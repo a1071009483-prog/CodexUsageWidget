@@ -1,0 +1,9 @@
+.dotnet/
+.artifacts/
+.superpowers/
+**/bin/
+**/obj/
+TestResults/
+*.user
+*.suo
+
