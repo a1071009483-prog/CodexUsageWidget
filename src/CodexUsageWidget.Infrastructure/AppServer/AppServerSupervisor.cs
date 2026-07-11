@@ -30,6 +30,28 @@ public sealed class AppServerSupervisorEventArgs(AppServerGenerationSession gene
 }
 
 /// <summary>
+/// Carries the required method names that a non-generating startup capability probe found
+/// missing from the locally advertised App Server method inventory. Only safe method names
+/// are exposed; raw schema content is never included.
+/// </summary>
+public sealed class AppServerIncompatibleEventArgs(IReadOnlyList<string> missingMethods) : EventArgs
+{
+    public IReadOnlyList<string> MissingMethods { get; } = missingMethods;
+}
+
+/// <summary>
+/// The terminal compatibility state observed at startup. <see cref="Incompatible"/> is a
+/// terminal, fail-closed state distinct from transient <c>Disconnected</c> or
+/// <c>MalformedMessage</c> connection failures: it never enters the restart loop.
+/// </summary>
+public enum AppServerCapabilityState
+{
+    Unknown,
+    Compatible,
+    Incompatible,
+}
+
+/// <summary>
 /// Owns successive one-generation <see cref="AppServerProcess"/> instances with capped
 /// backoff, current-generation notification forwarding, and retired-generation filtering.
 /// It never replays pending requests across a disconnect and never invokes generation
@@ -50,6 +72,7 @@ public sealed class AppServerSupervisor : IAsyncDisposable
     private readonly IDelay _graceDelay;
     private readonly AppServerSupervisorSettings _settings;
     private readonly IRedactingLog? _log;
+    private readonly Func<CancellationToken, Task<AppServerCapabilityResult>>? _capabilityPreflight;
 
     private readonly CancellationTokenSource _stopCts = new();
     private readonly object _currentLock = new();
@@ -65,6 +88,8 @@ public sealed class AppServerSupervisor : IAsyncDisposable
     private int _backoffStep;
     private Task? _runTask;
     private CancellationTokenSource? _runLinkedCts;
+    private AppServerCapabilityResult? _capabilityResult;
+    private int _compatibilityState;
 
     public AppServerSupervisor(
         IProcessHost processHost,
@@ -75,7 +100,8 @@ public sealed class AppServerSupervisor : IAsyncDisposable
         AppServerSupervisorSettings? settings = null,
         IDelay? healthyDelay = null,
         IDelay? graceDelay = null,
-        IRedactingLog? log = null)
+        IRedactingLog? log = null,
+        Func<CancellationToken, Task<AppServerCapabilityResult>>? capabilityPreflight = null)
     {
         _processHost = processHost ?? throw new ArgumentNullException(nameof(processHost));
         _startRequest = startRequest ?? throw new ArgumentNullException(nameof(startRequest));
@@ -85,6 +111,7 @@ public sealed class AppServerSupervisor : IAsyncDisposable
         _settings = settings ?? AppServerSupervisorSettings.Default;
         _healthyDelay = healthyDelay ?? backoffDelay;
         _graceDelay = graceDelay ?? new SystemDelay();
+        _capabilityPreflight = capabilityPreflight;
         _log = log;
     }
 
@@ -100,6 +127,18 @@ public sealed class AppServerSupervisor : IAsyncDisposable
     public event EventHandler<AppServerSupervisorEventArgs>? GenerationConfirmedHealthy;
 
     public event EventHandler<RateLimitsUpdatedEventArgs>? RateLimitsUpdated;
+
+    /// <summary>
+    /// Raised once at startup when the non-generating capability preflight finds the
+    /// locally advertised App Server method inventory incompatible (a required method is
+    /// missing). This is a terminal, fail-closed outcome: the supervisor does not enter the
+    /// transient restart loop and no session is published. Carries only safe method names.
+    /// </summary>
+    public event EventHandler<AppServerIncompatibleEventArgs>? IncompatibleDetected;
+
+    public AppServerCapabilityState Compatibility => (AppServerCapabilityState)Volatile.Read(ref _compatibilityState);
+
+    public AppServerCapabilityResult? CapabilityResult => _capabilityResult;
 
     public AppServerGenerationSession? CurrentGeneration
     {
@@ -120,9 +159,43 @@ public sealed class AppServerSupervisor : IAsyncDisposable
         }
 
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+
+        if (_capabilityPreflight is not null)
+        {
+            return StartWithPreflightAsync(cancellationToken);
+        }
+
         _runLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopCts.Token);
         _runTask = RunAsync(_runLinkedCts.Token);
         return _runTask;
+    }
+
+    private async Task StartWithPreflightAsync(CancellationToken cancellationToken)
+    {
+        AppServerCapabilityResult result;
+        try
+        {
+            result = await _capabilityPreflight!(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _capabilityResult = result;
+        if (!result.IsCompatible)
+        {
+            Volatile.Write(ref _compatibilityState, (int)AppServerCapabilityState.Incompatible);
+            IncompatibleDetected?.Invoke(
+                this,
+                new AppServerIncompatibleEventArgs(result.MissingMethods));
+            return;
+        }
+
+        Volatile.Write(ref _compatibilityState, (int)AppServerCapabilityState.Compatible);
+        _runLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopCts.Token);
+        _runTask = RunAsync(_runLinkedCts.Token);
+        await _runTask.ConfigureAwait(false);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
