@@ -149,6 +149,40 @@ public sealed class JsonRpcConnectionTests
         await Assert.ThrowsAsync<AppServerProtocolException>(() => connection.Completion);
     }
 
+    [Theory]
+    [InlineData("[1,2,3]")]
+    [InlineData("42")]
+    [InlineData("{}")]
+    [InlineData("{\"id\":1,\"result\":{},\"error\":{\"code\":-1,\"message\":\"m\"}}")]
+    [InlineData("{\"id\":1}")]
+    [InlineData("{\"id\":{\"x\":1},\"result\":{}}")]
+    [InlineData("{\"method\":123}")]
+    public async Task StructurallyMalformedFramesFaultTheConnectionAndPendingRequests(string frame)
+    {
+        var transport = new AsyncLineTransport();
+        await using var connection = new JsonRpcConnection(
+            transport.ServerOutput,
+            transport.ClientInput);
+        await connection.StartAsync(CancellationToken.None);
+
+        Task<JsonElement> pending = connection.SendRequestAsync<JsonElement>(
+            "account/read",
+            null,
+            CancellationToken.None);
+        _ = await transport.ClientInput.ReadLineAsync();
+        transport.ServerOutput.WriteLine(frame);
+
+        AppServerProtocolException pendingException =
+            await Assert.ThrowsAsync<AppServerProtocolException>(
+                () => pending.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.Equal(AppServerProtocolErrorKind.MalformedMessage, pendingException.Kind);
+
+        AppServerProtocolException completionException =
+            await Assert.ThrowsAsync<AppServerProtocolException>(
+                () => connection.Completion);
+        Assert.Equal(AppServerProtocolErrorKind.MalformedMessage, completionException.Kind);
+    }
+
     [Fact]
     public async Task DisposalCompletesRequestsWithActiveAndQueuedWrites()
     {

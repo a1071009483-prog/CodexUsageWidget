@@ -83,6 +83,14 @@ public static class Program
                     continue;
                 }
 
+                if (step.TryGetProperty("emitRaw", out JsonElement raw)
+                    && raw.ValueKind == JsonValueKind.String)
+                {
+                    await WriteProtocolLineAsync(raw.GetString() ?? string.Empty)
+                        .ConfigureAwait(false);
+                    continue;
+                }
+
                 if (step.TryGetProperty("hangAfterEof", out JsonElement hangAfterEof)
                     && hangAfterEof.ValueKind == JsonValueKind.True)
                 {
