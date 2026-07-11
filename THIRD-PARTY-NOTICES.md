@@ -8,6 +8,7 @@ including a component here does not alter its license terms.
 | --- | ---: | --- | --- |
 | .NET SDK / Runtime, WPF, and Windows Forms | 8.0.422 / .NET 8 | MIT | <https://github.com/dotnet> |
 | Microsoft.Data.Sqlite | 8.0.28 | MIT | <https://github.com/dotnet/efcore> |
+| System.Text.Json | 8.0.6 | MIT | <https://github.com/dotnet/runtime> |
 | System.Security.Cryptography.ProtectedData | 8.0.0 | MIT | <https://github.com/dotnet/runtime> |
 | Microsoft.NET.Test.Sdk | 17.14.1 | MIT | <https://github.com/microsoft/vstest> |
 | xunit | 2.9.3 | Apache-2.0 | <https://github.com/xunit/xunit> |

@@ -10,11 +10,19 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$dotnet = Join-Path $repoRoot '.dotnet\dotnet.exe'
+$repoDotnet = Join-Path $repoRoot '.dotnet\dotnet.exe'
 $solution = Join-Path $repoRoot 'CodexUsageWidget.sln'
 
-if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf)) {
-    throw "The repository-local .NET SDK was not found at '$dotnet'."
+if (Test-Path -LiteralPath $repoDotnet -PathType Leaf) {
+    $dotnet = $repoDotnet
+}
+else {
+    $dotnetCommand = Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue
+    if ($null -eq $dotnetCommand) {
+        throw "A .NET 8 SDK is required. Install it or place the repository-local SDK at '$repoDotnet'."
+    }
+
+    $dotnet = $dotnetCommand.Source
 }
 
 $arguments = @(

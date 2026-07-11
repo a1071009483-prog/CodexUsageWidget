@@ -89,7 +89,92 @@ public sealed class BoundaryTests
             $"Core references forbidden implementation types: {string.Join(", ", forbiddenTypes)}");
     }
 
+    [Fact]
+    public void CoreBoundariesExposeUsableAsynchronousContracts()
+    {
+        Assembly coreAssembly = LoadCoreAssembly();
+        string[] requiredTypes =
+        [
+            "IHostedProcess",
+            "ProcessStartRequest",
+            "ProcessExitResult",
+            "AppFileReadRequest",
+            "AppFileReadResult",
+            "AppFileWriteRequest",
+            "AppFileWriteResult",
+            "UserNotificationRequest",
+            "UserNotificationResult",
+            "ModelGenerationRequest",
+            "ModelGenerationResult",
+            "StructuredLogEvent",
+        ];
+
+        string[] missingTypes = requiredTypes
+            .Where(name => coreAssembly.GetType($"{AbstractionsNamespace}.{name}") is null)
+            .ToArray();
+
+        Assert.True(
+            missingTypes.Length == 0,
+            $"Missing operational boundary types: {string.Join(", ", missingTypes)}");
+
+        Type TypeNamed(string name) => coreAssembly.GetType($"{AbstractionsNamespace}.{name}")!;
+
+        AssertMethod(
+            TypeNamed("IProcessHost"),
+            "StartAsync",
+            typeof(Task<>).MakeGenericType(TypeNamed("IHostedProcess")),
+            TypeNamed("ProcessStartRequest"),
+            typeof(CancellationToken));
+        AssertMethod(
+            TypeNamed("IHostedProcess"),
+            "WaitForExitAsync",
+            typeof(Task<>).MakeGenericType(TypeNamed("ProcessExitResult")),
+            typeof(CancellationToken));
+        AssertMethod(
+            TypeNamed("IAppFileSystem"),
+            "ReadTextAsync",
+            typeof(Task<>).MakeGenericType(TypeNamed("AppFileReadResult")),
+            TypeNamed("AppFileReadRequest"),
+            typeof(CancellationToken));
+        AssertMethod(
+            TypeNamed("IAppFileSystem"),
+            "WriteTextAsync",
+            typeof(Task<>).MakeGenericType(TypeNamed("AppFileWriteResult")),
+            TypeNamed("AppFileWriteRequest"),
+            typeof(CancellationToken));
+        AssertMethod(
+            TypeNamed("IUserNotifier"),
+            "NotifyAsync",
+            typeof(Task<>).MakeGenericType(TypeNamed("UserNotificationResult")),
+            TypeNamed("UserNotificationRequest"),
+            typeof(CancellationToken));
+        AssertMethod(
+            TypeNamed("IModelBoundary"),
+            "StartGenerationAsync",
+            typeof(Task<>).MakeGenericType(TypeNamed("ModelGenerationResult")),
+            TypeNamed("ModelGenerationRequest"),
+            typeof(CancellationToken));
+        AssertMethod(
+            TypeNamed("IRedactingLog"),
+            "WriteAsync",
+            typeof(ValueTask),
+            TypeNamed("StructuredLogEvent"),
+            typeof(CancellationToken));
+    }
+
     private static Assembly LoadCoreAssembly() => Assembly.Load(CoreAssemblyName);
+
+    private static void AssertMethod(
+        Type declaringType,
+        string methodName,
+        Type returnType,
+        params Type[] parameterTypes)
+    {
+        MethodInfo? method = declaringType.GetMethod(methodName, parameterTypes);
+
+        Assert.NotNull(method);
+        Assert.Equal(returnType, method.ReturnType);
+    }
 
     private static bool IsForbiddenAssembly(string assemblyName) =>
         assemblyName is "PresentationCore"

@@ -6,7 +6,7 @@
 
 **Architecture:** A pure `Core` library owns quota normalization, freshness, model selection, and the activation state machine. `Infrastructure` owns the supervised Codex App Server JSONL client, SQLite durable state, Windows integration, and redacted logging. The WPF `App` consumes only immutable view state and commands; fake-server and unit projects verify protocol, timing, crash, safety, and UI behavior.
 
-**Tech Stack:** .NET SDK 8.0.422, WPF/Windows Forms tray APIs, System.Text.Json, Microsoft.Data.Sqlite 8.0.28, System.Security.Cryptography.ProtectedData 8.0.0, xUnit 2.9.3, xunit.runner.visualstudio 2.8.2, Microsoft.NET.Test.Sdk 17.14.1, coverlet.collector 6.0.4.
+**Tech Stack:** .NET SDK 8.0.422, WPF/Windows Forms tray APIs, System.Text.Json 8.0.6, Microsoft.Data.Sqlite 8.0.28, System.Security.Cryptography.ProtectedData 8.0.0, xUnit 2.9.3, xunit.runner.visualstudio 2.8.2, Microsoft.NET.Test.Sdk 17.14.1, coverlet.collector 6.0.4.
 
 ## Global Constraints
 
@@ -40,7 +40,7 @@
 
 - [ ] Write `BoundaryTests` first to require the abstractions and prohibit `Core` references to WPF, SQLite, process, registry, or file-system implementation types.
 - [ ] Run `\.dotnet\dotnet.exe test tests\CodexUsageWidget.Core.Tests` and verify RED because the solution and abstractions do not exist.
-- [ ] Scaffold the projects, central package versions, nullable/analysis settings, the seven interfaces, license notes, and `scripts/build.ps1`.
+- [ ] Scaffold the projects, central package versions, nullable/analysis settings, usable asynchronous contracts for the seven boundaries, a tested JSON-lines redacting logger, license notes, and `scripts/build.ps1` with local-SDK/PATH discovery.
 - [ ] Run `\.dotnet\dotnet.exe test CodexUsageWidget.sln` and verify GREEN with a clean build.
 
 ### Task 2: Current App Server JSON-RPC transport and typed gateway
