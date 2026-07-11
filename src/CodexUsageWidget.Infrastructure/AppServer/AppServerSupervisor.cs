@@ -120,7 +120,6 @@ public sealed class AppServerSupervisor : IAsyncDisposable
         }
 
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        Volatile.Write(ref _stopped, 0);
         _runLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopCts.Token);
         _runTask = RunAsync(_runLinkedCts.Token);
         return _runTask;
@@ -321,9 +320,15 @@ public sealed class AppServerSupervisor : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Forwards a rate-limits notification only if it originates from the current
+    /// generation. This is defense-in-depth: <see cref="RetireGeneration"/> also
+    /// unsubscribes the handler, so in practice a retired generation's pump has
+    /// already exited and cannot raise this. The identity check covers the window
+    /// where a notification was already in-flight when unsubscribe took effect.
+    /// </summary>
     private void ForwardRateLimits(long generation, RateLimitsUpdatedEventArgs args)
     {
-        _ = args;
         if (Volatile.Read(ref _currentGeneration) != generation)
         {
             return;
@@ -332,6 +337,12 @@ public sealed class AppServerSupervisor : IAsyncDisposable
         RateLimitsUpdated?.Invoke(this, args);
     }
 
+    /// <summary>
+    /// Raises <see cref="GenerationConfirmedHealthy"/> for a generation that just survived
+    /// the healthy interval. Invariant: called only from the <see cref="RunAsync"/> flow,
+    /// before <see cref="RetireGeneration"/> for that generation, so the generation is still
+    /// current when this fires.
+    /// </summary>
     private void RaiseConfirmedHealthy(long generation)
     {
         AppServerGenerationSession? current;
