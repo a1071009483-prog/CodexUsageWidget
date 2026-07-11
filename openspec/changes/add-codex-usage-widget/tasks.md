@@ -1,9 +1,9 @@
 ## 1. Solution Foundation
 
-- [ ] 1.1 Create a `.NET 8` solution with WPF application, core domain, App Server/persistence infrastructure, and automated test projects.
-- [ ] 1.2 Add and pin the required Windows desktop, SQLite, JSON serialization, and test dependencies, then document their licenses and runtime prerequisites.
-- [ ] 1.3 Define shared clock, scheduler, process, file-system, notification, and model-boundary interfaces so time, crashes, and App Server behavior can be tested deterministically.
-- [ ] 1.4 Add structured redacting logs and a baseline build/test command that succeeds before feature implementation.
+- [x] 1.1 Create a `.NET 8` solution with WPF application, core domain, App Server/persistence infrastructure, and automated test projects.
+- [x] 1.2 Add and pin the required Windows desktop, SQLite, JSON serialization, and test dependencies, then document their licenses and runtime prerequisites.
+- [x] 1.3 Define shared clock, scheduler, process, file-system, notification, and model-boundary interfaces so time, crashes, and App Server behavior can be tested deterministically.
+- [x] 1.4 Add structured redacting logs and a baseline build/test command that succeeds before feature implementation.
 
 ## 2. Codex App Server Integration
 

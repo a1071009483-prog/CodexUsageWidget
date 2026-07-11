@@ -38,10 +38,10 @@
 **Interfaces:**
 - Produces: `IClock.UtcNow`, `IDelay.DelayAsync`, `IProcessHost`, `IAppFileSystem`, `IUserNotifier`, `IModelBoundary`, `IRedactingLog`.
 
-- [ ] Write `BoundaryTests` first to require the abstractions and prohibit `Core` references to WPF, SQLite, process, registry, or file-system implementation types.
-- [ ] Run `\.dotnet\dotnet.exe test tests\CodexUsageWidget.Core.Tests` and verify RED because the solution and abstractions do not exist.
-- [ ] Scaffold the projects, central package versions, nullable/analysis settings, usable asynchronous contracts for the seven boundaries, a tested JSON-lines redacting logger, license notes, and `scripts/build.ps1` with local-SDK/PATH discovery.
-- [ ] Run `\.dotnet\dotnet.exe test CodexUsageWidget.sln` and verify GREEN with a clean build.
+- [x] Write `BoundaryTests` first to require the abstractions and prohibit `Core` references to WPF, SQLite, process, registry, or file-system implementation types.
+- [x] Run `\.dotnet\dotnet.exe test tests\CodexUsageWidget.Core.Tests` and verify RED because the solution and abstractions do not exist.
+- [x] Scaffold the projects, central package versions, nullable/analysis settings, usable asynchronous contracts for the seven boundaries, a tested JSON-lines redacting logger, license notes, and `scripts/build.ps1` with local-SDK/PATH discovery.
+- [x] Run `\.dotnet\dotnet.exe test CodexUsageWidget.sln` and verify GREEN with a clean build.
 
 ### Task 2: Current App Server JSON-RPC transport and typed gateway
 
