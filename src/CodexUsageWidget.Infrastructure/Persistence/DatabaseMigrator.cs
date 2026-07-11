@@ -74,7 +74,7 @@ public sealed class DatabaseMigrator
         DbConnection connection,
         CancellationToken cancellationToken)
     {
-        using DbCommand command = connection.CreateCommand();
+        await using DbCommand command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
         object? result = await command.ExecuteScalarAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -86,7 +86,7 @@ public sealed class DatabaseMigrator
         int version,
         CancellationToken cancellationToken)
     {
-        using DbCommand command = connection.CreateCommand();
+        await using DbCommand command = connection.CreateCommand();
         command.CommandText = string.Format(
             CultureInfo.InvariantCulture,
             "PRAGMA user_version = {0};",
@@ -100,7 +100,7 @@ public sealed class DatabaseMigrator
         string sql,
         CancellationToken cancellationToken)
     {
-        using DbCommand command = connection.CreateCommand();
+        await using DbCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);

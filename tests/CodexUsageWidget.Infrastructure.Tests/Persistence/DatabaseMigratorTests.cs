@@ -43,6 +43,28 @@ public sealed class DatabaseMigratorTests
     }
 
     [Fact]
+    public async Task StaleVersionAfterCrashReAppliesIdempotentMigrationWithoutError()
+    {
+        // PRAGMA user_version is advanced after the migration transaction commits, so a crash
+        // between commit and version-advance leaves the database with tables present but a
+        // stale version. Re-migrating must re-apply the idempotent migration safely and end
+        // at the latest version.
+        using SqliteConnection connection = await OpenInMemoryAsync();
+        var migrator = new DatabaseMigrator(UsageStateSchema.Migrations);
+
+        await migrator.MigrateAsync(connection, CancellationToken.None);
+        Assert.Equal(UsageStateSchema.LatestVersion, await GetUserVersionAsync(connection));
+
+        await SetUserVersionAsync(connection, 0);
+
+        await migrator.MigrateAsync(connection, CancellationToken.None);
+
+        Assert.Equal(UsageStateSchema.LatestVersion, await GetUserVersionAsync(connection));
+        HashSet<string> tables = await GetTableNamesAsync(connection);
+        Assert.Equal(6, tables.Count);
+    }
+
+    [Fact]
     public async Task MigrationFailureFailsClosedAndDoesNotSilentlyRecover()
     {
         using SqliteConnection connection = await OpenInMemoryAsync();
@@ -105,6 +127,16 @@ public sealed class DatabaseMigratorTests
         command.CommandText = "PRAGMA user_version;";
         object? result = await command.ExecuteScalarAsync();
         return Convert.ToInt32(result, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task SetUserVersionAsync(SqliteConnection connection, int version)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = string.Format(
+            CultureInfo.InvariantCulture,
+            "PRAGMA user_version = {0};",
+            version);
+        await command.ExecuteNonQueryAsync();
     }
 
     private static async Task<HashSet<string>> GetTableNamesAsync(SqliteConnection connection)
