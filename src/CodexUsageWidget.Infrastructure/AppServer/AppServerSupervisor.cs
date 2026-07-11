@@ -134,6 +134,14 @@ public sealed class AppServerSupervisor : IAsyncDisposable
     /// missing). This is a terminal, fail-closed outcome: the supervisor does not enter the
     /// transient restart loop and no session is published. Carries only safe method names.
     /// </summary>
+    /// <remarks>
+    /// Contract for the injected <c>capabilityPreflight</c>: it MUST be non-generating
+    /// (never probe a live server, never invoke <c>thread/start</c>/<c>turn/start</c>) and
+    /// MUST NOT throw on an inability to determine capability; instead it must return an
+    /// <see cref="AppServerCapabilityResult"/> with <c>IsCompatible == false</c> so the
+    /// supervisor fails closed without crashing. A thrown non-cancellation exception
+    /// propagates out of <see cref="StartAsync"/> as a caller bug.
+    /// </remarks>
     public event EventHandler<AppServerIncompatibleEventArgs>? IncompatibleDetected;
 
     public AppServerCapabilityState Compatibility => (AppServerCapabilityState)Volatile.Read(ref _compatibilityState);
@@ -172,13 +180,18 @@ public sealed class AppServerSupervisor : IAsyncDisposable
 
     private async Task StartWithPreflightAsync(CancellationToken cancellationToken)
     {
+        // The preflight is cancelable by both the caller's token and an explicit stop so
+        // StopAsync/DisposeAsync can interrupt a long-running preflight.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopCts.Token);
         AppServerCapabilityResult result;
         try
         {
-            result = await _capabilityPreflight!(cancellationToken).ConfigureAwait(false);
+            result = await _capabilityPreflight!(linked.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _stopCts.IsCancellationRequested)
         {
+            // Cancelled before capability could be determined: do not enter the loop, do
+            // not raise an incompatible outcome (the caller stopped intentionally).
             return;
         }
 

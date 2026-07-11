@@ -26,6 +26,8 @@ public sealed class AppServerCompatibilityTests
     [InlineData("turn/interrupt")]
     [InlineData("thread/delete")]
     [InlineData("account/rateLimits/read")]
+    [InlineData("account/read")]
+    [InlineData("model/list")]
     [InlineData("initialize")]
     public async Task MissingRequiredMethodFailsClosedAndIsNotRetriedAsTransient(string missingMethod)
     {
@@ -131,6 +133,60 @@ public sealed class AppServerCompatibilityTests
 
         cts.Cancel();
         await startTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await supervisor.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task CancelDuringPreflightStopsStartWithoutEnteringLoopOrRaisingIncompatible()
+    {
+        // The preflight never completes on its own; it observes cancellation. Cancelling the
+        // start token must stop StartAsync without raising IncompatibleDetected, publishing a
+        // session, or launching a process.
+        var diagnostics = new AppServerCapabilityDiagnostics();
+        var host = new CountingProcessHost();
+        var preflightEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var preflightCalled = 0;
+
+        var supervisor = new AppServerSupervisor(
+            host,
+            new ProcessStartRequest("codex", ["--app-server"]),
+            new ClientInformation("codex-usage-widget", "1.0.0", "Codex Usage Widget"),
+            TimeSpan.FromSeconds(30),
+            new RecordingDelay(),
+            AppServerSupervisorSettings.Default,
+            healthyDelay: new NeverElapsingDelay(),
+            graceDelay: new NeverElapsingDelay(),
+            capabilityPreflight: async cancellationToken =>
+            {
+                Interlocked.Increment(ref preflightCalled);
+                preflightEntered.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+                    .ConfigureAwait(false);
+                return diagnostics.Evaluate(AppServerCapabilityDiagnostics.RequiredMethods);
+            },
+            log: null);
+
+        var incompatibleRaised = 0;
+        supervisor.IncompatibleDetected += (_, _) => Interlocked.Increment(ref incompatibleRaised);
+
+        using var cts = new CancellationTokenSource();
+        Task startTask = supervisor.StartAsync(cts.Token);
+
+        await preflightEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, Volatile.Read(ref preflightCalled));
+
+        cts.Cancel();
+
+        // StartAsync completes (the cancellation was observed inside the preflight; no loop,
+        // no incompatible outcome, no exception propagated).
+        await startTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, Volatile.Read(ref preflightCalled));
+        Assert.Equal(0, host.StartCallCount);
+        Assert.Equal(0, Volatile.Read(ref incompatibleRaised));
+        Assert.Equal(AppServerCapabilityState.Unknown, supervisor.Compatibility);
 
         await supervisor.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
     }
