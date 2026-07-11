@@ -55,11 +55,20 @@ public sealed class SystemProcessHost : IProcessHost
 
         Process process = new() { StartInfo = startInfo };
 
-        if (!process.Start())
+        try
         {
+            if (!process.Start())
+            {
+                process.Dispose();
+                throw new InvalidOperationException(
+                    "The child process was already started by another component.");
+            }
+        }
+        catch
+        {
+            // A failed start (e.g. file not found) must not leak the Process object.
             process.Dispose();
-            throw new InvalidOperationException(
-                "The child process was already started by another component.");
+            throw;
         }
 
         // Cancellation racing after a successful launch must not orphan the child:
@@ -150,14 +159,48 @@ public sealed class SystemProcessHost : IProcessHost
 
         public Task<ProcessExitResult> TerminateAsync(CancellationToken cancellationToken)
         {
-            // Idempotent: a single termination attempt is ever made.
-            if (Interlocked.Exchange(ref _terminationStarted, 1) == 1
-                || _process.HasExited)
+            bool firstCall = Interlocked.Exchange(ref _terminationStarted, 1) == 0;
+
+            // An already-exited process completes immediately with the observed lifetime.
+            if (_process.HasExited)
             {
                 return Task.FromResult(BuildResult());
             }
 
+            if (!firstCall)
+            {
+                // A prior call already issued a kill (or is still awaiting exit). Await the
+                // shared exit completion so this repeated call returns the same completed
+                // lifetime result rather than reading ExitCode before the process has exited.
+                return AwaitExitCompletionAsync(cancellationToken);
+            }
+
             return TerminateCoreAsync(cancellationToken);
+        }
+
+        private async Task<ProcessExitResult> AwaitExitCompletionAsync(CancellationToken cancellationToken)
+        {
+            await AwaitExitAsync(cancellationToken).ConfigureAwait(false);
+            return BuildResult();
+        }
+
+        private async Task AwaitExitAsync(CancellationToken cancellationToken)
+        {
+            if (_process.HasExited)
+            {
+                return;
+            }
+
+            // Race exit against caller cancellation WITHOUT faulting the shared completion,
+            // so an abandoned await does not poison a later one.
+            Task cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            Task completed = await Task.WhenAny(_exitCompletion.Task, cancellationTask)
+                .ConfigureAwait(false);
+
+            if (completed == cancellationTask)
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
         }
 
         private async Task<ProcessExitResult> TerminateCoreAsync(CancellationToken cancellationToken)
@@ -175,21 +218,14 @@ public sealed class SystemProcessHost : IProcessHost
                 // Best-effort termination; still await observed exit.
             }
 
+            // Mark self-initiated termination BEFORE awaiting exit, so an abandoned await
+            // (caller cancellation) still records that this wrapper killed the child.
+            _terminated = true;
+
             // Await actual exit, honoring caller cancellation. The kill was already issued,
             // so the child will still exit even if the caller abandons this await.
-            if (!_process.HasExited)
-            {
-                Task cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-                Task completed = await Task.WhenAny(_exitCompletion.Task, cancellationTask)
-                    .ConfigureAwait(false);
+            await AwaitExitAsync(cancellationToken).ConfigureAwait(false);
 
-                if (completed == cancellationTask)
-                {
-                    throw new OperationCanceledException(cancellationToken);
-                }
-            }
-
-            _terminated = true;
             return BuildResult();
         }
 
