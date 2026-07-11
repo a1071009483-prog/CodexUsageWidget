@@ -19,5 +19,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CodexUsageWidget.Infrastructure\CodexUsageWidget.Infrastructure.csproj" />
+    <ProjectReference Include="..\FakeCodexAppServer\FakeCodexAppServer.csproj" />
   </ItemGroup>
 </Project>

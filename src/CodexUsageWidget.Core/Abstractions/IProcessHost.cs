@@ -22,6 +22,15 @@ public interface IHostedProcess : IAsyncDisposable
     TextReader StandardError { get; }
 
     Task<ProcessExitResult> WaitForExitAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Idempotently terminates the hosted process tree. If the process is still
+    /// running, the entire child process tree is killed and the actual exit is
+    /// awaited, returning <see cref="ProcessExitResult.WasTerminated"/> = true.
+    /// If the process has already exited, the observed natural exit result is
+    /// returned. Repeated calls return the same completed lifetime result.
+    /// </summary>
+    Task<ProcessExitResult> TerminateAsync(CancellationToken cancellationToken);
 }
 
 public sealed record ProcessStartRequest(
