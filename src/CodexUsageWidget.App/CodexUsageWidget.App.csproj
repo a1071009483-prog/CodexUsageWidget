@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodexUsageWidget.Core\CodexUsageWidget.Core.csproj" />
+    <ProjectReference Include="..\CodexUsageWidget.Infrastructure\CodexUsageWidget.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
