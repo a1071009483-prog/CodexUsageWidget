@@ -7,12 +7,12 @@
 
 ## 2. Codex App Server Integration
 
-- [ ] 2.1 Implement Codex executable discovery plus startup capability diagnostics for the required account, rate-limit, model, thread, turn, interrupt, and delete methods.
-- [ ] 2.2 Implement a supervised `codex app-server` stdio JSONL process with initialize/initialized handshake, graceful shutdown, cancellation, and bounded restart backoff.
-- [ ] 2.3 Implement JSON-RPC request correlation, tolerant response parsing, notification dispatch, protocol-error classification, and stale-response rejection.
-- [ ] 2.4 Add typed clients for `account/read`, `account/rateLimits/read`, `account/rateLimits/updated`, `model/list`, temporary thread creation, `turn/start`, `turn/interrupt`, and thread deletion.
-- [ ] 2.5 Implement supported-authentication detection and account/workspace identity extraction without reading cookies, raw credentials, or authentication files.
-- [ ] 2.6 Build a scriptable fake App Server process and contract tests for handshake, request ordering, notifications, disconnects, malformed messages, and method incompatibility.
+- [x] 2.1 Implement Codex executable discovery plus startup capability diagnostics for the required account, rate-limit, model, thread, turn, interrupt, and delete methods.
+- [x] 2.2 Implement a supervised `codex app-server` stdio JSONL process with initialize/initialized handshake, graceful shutdown, cancellation, and bounded restart backoff.
+- [x] 2.3 Implement JSON-RPC request correlation, tolerant response parsing, notification dispatch, protocol-error classification, and stale-response rejection.
+- [x] 2.4 Add typed clients for `account/read`, `account/rateLimits/read`, `account/rateLimits/updated`, `model/list`, temporary thread creation, `turn/start`, `turn/interrupt`, and thread deletion.
+- [x] 2.5 Implement supported-authentication detection and account/workspace identity extraction without reading cookies, raw credentials, or authentication files.
+- [x] 2.6 Build a scriptable fake App Server process and contract tests for handshake, request ordering, notifications, disconnects, malformed messages, and method incompatibility.
 
 ## 3. Durable Safety State and Process Coordination
 
