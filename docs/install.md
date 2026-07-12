@@ -84,13 +84,46 @@ retain audit history. To remove local data as well, run:
 
 ## Upgrade and rollback
 
-To upgrade, run `scripts/package.ps1` for the new version and then
-`scripts/install.ps1`. The installer overwrites the existing installation files
-and preserves your settings. The application validates the local SQLite database
-on startup and disables automatic triggering if the database cannot be migrated
-safely.
+### Upgrade
 
-To roll back, uninstall the new version and reinstall the previous build. Local
-state can remain while any active five-hour suppression period has not yet
-expired; removing local data before the suppression period ends could remove a
-live guard and must be done with care.
+Build the new version and run the upgrade script:
+
+```powershell
+.\scripts\package.ps1 -Configuration Release
+.\scripts\upgrade.ps1
+```
+
+`upgrade.ps1` will:
+
+1. Stop any running widget instance.
+2. Create a timestamped backup of the current installation under
+   `%LOCALAPPDATA%\CodexUsageWidget-backups\`.
+3. Copy the new build into `%LOCALAPPDATA%\CodexUsageWidget\`.
+4. Preserve the **Start with Windows** setting.
+5. Remove older backups, keeping the most recent three.
+
+On the next launch the widget validates and migrates the local SQLite database.
+If migration cannot be performed safely, automatic triggering is disabled and a
+safety error is shown.
+
+### Rollback
+
+If the new build fails, restore the most recent backup:
+
+```powershell
+.\scripts\rollback.ps1
+```
+
+To restore a specific backup, pass its directory:
+
+```powershell
+.\scripts\rollback.ps1 -BackupDirectory "$env:LOCALAPPDATA\CodexUsageWidget-backups\20260712-120000"
+```
+
+`rollback.ps1` stops the running instance, replaces the current installation
+with the chosen backup, and re-registers startup if requested.
+
+Local state under `%LOCALAPPDATA%\CodexUsageWidget\` is not removed by either
+script. Removing local data while an active five-hour suppression guard is still
+live could erase the at-most-once lock, so use `-RemoveLocalData` with
+`uninstall.ps1` only when you are sure no recent activation is in progress.

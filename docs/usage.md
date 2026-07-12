@@ -1,111 +1,128 @@
 # Using Codex Usage Widget
 
-The Codex Usage Widget helps you stay within your Codex account quota by showing
-a compact, always-on-top window that updates as you work.
+The Codex Usage Widget is a resident Windows floating window that shows your
+Codex five-hour and weekly quota in real time. It can also automatically start a
+fully unused five-hour window with exactly one guarded minimal turn.
 
 ## What the widget shows
 
-- **Quota progress bar**: the current percentage of the active quota period that
-  has been used. Primary limits are shown by default; when a lower fallback model
-  is available, its allowance is shown as a secondary bar.
-- **Status text**: one of `normal`, `warning`, or `suppressed`. Suppression means
-  the widget has temporarily stopped showing a reminder because you recently
-  dismissed it.
-- **Time remaining**: time left in the current quota window, if the App Server
-  provides it.
+The floating widget contains two cards:
 
-## Quota semantics
+- **5h** — the rolling five-hour usage window.
+- **本周** — the rolling weekly usage window.
 
-The widget reads your rate limits from the Codex CLI App Server and compares the
-used percentage to two thresholds that you can configure in settings:
+Each card shows:
 
-- **Warning threshold** (default `80`): the widget turns yellow when usage passes
-  this value.
-- **Suppression threshold** (default `95`): the widget enters a five-hour
-  cooldown when usage passes this value and you dismiss the alert, so the visual
-  reminder does not dominate your screen during an urgent session.
+- **Remaining percentage** — `100 - usedPercent`, clamped to `0–100`.
+- **Progress bar** — the same remaining percentage visually.
+- **Countdown** — time left until the bucket's `resetsAt`, calculated locally and
+  updated once per second.
+- **Status text** — one of `已同步`, `已过期`, `不可用`, or `100%·计时已启动`.
+- **Last sync time** — local time of the last successful App Server read.
 
-The cooldown duration is fixed at five hours. Once the cooldown expires, the
-widget returns to normal monitoring automatically.
+The widget also shows the current connection state (`connecting`, `monitoring`,
+`authentication-required`, `disconnected`, `error`) and whether automatic
+triggering is enabled or paused.
 
-## Model fallback
+## Color thresholds
 
-When the App Server reports a fallback model with its own quota, the widget
-displays it as a secondary bar. Fallback usage is informational: it warns you
-when the cheaper model is also running low, but it does not trigger suppression.
+Both cards use the same thresholds for the percentage and progress bar color:
 
-## Startup behavior
+| Remaining | State | Color |
+|-----------|-------|-------|
+| > 30% | Normal | Green |
+| 11% – 30% | Warning | Yellow |
+| ≤ 10% | Critical | Red |
 
-When the widget starts:
+## The active-but-rounded 100% state
 
-1. It validates the local SQLite state database.
-2. It starts the Codex App Server child process through
-   `AppServerSupervisor`.
-3. It connects to the App Server and waits for a handshake.
-4. It reads the current rate limits and begins listening for notifications.
-5. It opens the floating window and, if configured, minimizes to the system
-tray.
+Codex App Server may round a freshly started five-hour window back to
+`usedPercent = 0` (100% remaining). When the widget has verified that the
+five-hour `resetsAt` has moved to a future time, the five-hour card shows the
+exact text:
 
-If the App Server process exits unexpectedly, the supervisor automatically
-restarts it and re-establishes the session. The window remains visible while the
-restart happens, but controls are disabled until the session is live again.
+```
+100%·计时已启动
+```
+
+This means the timer is running even though the rounded percentage still reads
+100%.
+
+## Countdown and freshness
+
+- The countdown ticks locally every second using the last authoritative UTC
+  `resetsAt`.
+- When a bucket's reset instant passes, the widget marks the countdown as due
+  and requests a fresh read-only reconciliation instead of guessing the new
+  value.
+- If more than two minutes pass without a successful App Server read, the data
+  is marked **stale**. Stale values remain visible but are never used for
+  automatic activation.
 
 ## Tray controls
 
-Right-click the system-tray icon to:
+Right-click the system-tray icon for:
 
-- **Show / Hide**: toggle the floating window.
-- **Refresh now**: force a fresh read of rate limits.
-- **Settings**: open the settings editor.
-- **Export audit log**: write the SQLite audit log to a JSON file of your
-  choice.
-- **Exit**: close the application.
+- **Show / Hide** — toggle the floating widget without exiting the application.
+- **Refresh Now** — force one immediate read-only quota reconciliation.
+- **Pause / Resume Automatic Triggering** — pause or resume automatic five-hour
+  activation without stopping quota monitoring.
+- **Start with Windows** — enable or disable the per-user startup registry entry.
+- **Audit** — open the local redacted audit view.
+- **Reconnect** — restart the Codex App Server connection.
+- **Exit** — close the resident application.
 
-Left-clicking the tray icon shows or hides the floating window.
+There is **no** force-consume or manual trigger command. Automatic activation is
+the only widget-initiated path that can start a turn, and it runs only when all
+safety preconditions pass.
 
-## Audit log
+## Automatic five-hour activation
 
-The widget records every significant action to a local SQLite database under
-`%LOCALAPPDATA%\CodexUsageWidget\`:
+When all of the following are true, the widget will automatically start an
+unused five-hour window once per window:
 
-- App Server session starts, stops, and restarts.
-- Rate-limit reads and notification events.
-- Suppression decisions (trigger and dismiss).
-- Errors that affect the widget state.
+1. Automatic triggering is enabled and not paused.
+2. The current account uses ChatGPT-backed Codex authentication.
+3. The five-hour bucket is fresh and reports exactly `usedPercent = 0`.
+4. No durable lock or verified future reset proves the window is already active.
 
-You can export the audit log from the tray menu. The exported JSON does not
-contain raw tokens or credentials; sensitive values are redacted before export
-and before any log entry is written.
+The activation workflow:
 
-## Known limitations
+- Two consecutive fresh confirmations of the unused bucket.
+- A durable write-ahead lock is flushed before any turn is sent.
+- A final read-only preflight just before generation.
+- One minimal fixed-response turn with no tools in a temporary thread.
+- Verification through a changed future `resetsAt` within 60 seconds.
+- Deletion of the temporary thread and redacted audit recording.
 
-- **App Server handshake race**: if you open the widget before the Codex CLI is
-  fully configured, the first handshake may fail. The supervisor retries with
-  exponential backoff; ensure `codex login` has completed.
-- **Single-instance binding**: only one widget instance can hold the named
-  activation lock at a time. Starting a second instance shows the existing
-  instance instead of launching a second copy.
-- **Windows-only**: the WPF UI requires Windows 10 version 19041 or later.
-  Core logic builds on Linux with `EnableWindowsTargeting=true` but the UI and
-  tests cannot run there.
-- **Process-level cleanup on Windows**: executable files written by the fake
-  App Server E2E tests may remain locked briefly after the test process exits.
-  Test cleanup is best-effort.
+If the outcome is ambiguous, the widget retains the lock and never retries in the
+same five-hour window. Safety always takes precedence over retrying.
 
-## Troubleshooting
+## Startup behavior
 
-| Symptom | Likely cause | What to do |
-|---------|-------------|------------|
-| Widget shows "disconnected" | `codex app-server` is not running or not responding | Run `codex app-server` from a terminal and check for errors. |
-| Quota never updates | App Server handshake incomplete | Restart the widget; sign in with `codex login`. |
-| Widget does not start with Windows | Startup registry entry missing | Re-run `scripts/install.ps1`. |
-| Suppression never clears | Five-hour cooldown still active | Wait for the cooldown, or exit the widget and remove local data (this also removes audit history). |
-| Crash on startup | Local database state may be corrupted | The widget writes a redacted crash report to `%LOCALAPPDATA%\CodexUsageWidget\crashes\`. Review it, then remove local data if needed. |
-| Two widgets appear | Activation lock was bypassed | Exit both copies and restart from the Start menu or tray icon. |
+On a fresh install:
+
+1. The widget validates the local SQLite state database.
+2. It starts the Codex App Server child process through
+   `AppServerSupervisor`.
+3. It completes the App Server initialization handshake.
+4. It reads the current rate limits and subscribes to update notifications.
+5. It opens the floating widget and minimizes to the system tray.
+
+If the App Server exits unexpectedly, the supervisor restarts it with bounded
+backoff and re-establishes the session. The widget remains visible during
+restart.
 
 ## Privacy notes
 
-The widget does not send usage data, crash reports, or credentials to any
-remote service. Logs, crash reports, and audit exports are kept on your local
-machine and redact bearer tokens, API keys, email addresses, absolute paths,
-and prompts before they are written.
+The widget does not read Codex cookies, raw credentials, API keys, or browser
+storage. Account emails are hashed before persistence. The activation prompt is a
+compiled constant and is not stored in audit rows. Logs, crash reports, and audit
+exports are kept locally and redact tokens, paths, and prompt/response content.
+
+See [security.md](security.md) for the full security model.
+
+## Troubleshooting
+
+See [troubleshooting.md](troubleshooting.md) for common symptoms and recovery
+steps.

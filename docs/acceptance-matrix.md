@@ -182,8 +182,11 @@ Expected evidence:
 five-hour window is fully unused and you explicitly approve.
 
 ```powershell
-# Confirm usedPercent = 0 and no active timer
-codex usage --format json | ConvertFrom-Json
+# Confirm the five-hour bucket is fully unused before running the test.
+# The test itself will fail fast with a clear message if usedPercent != 0
+# or if a future resetsAt is already present. If the Codex CLI provides a
+# usage/status command, you can inspect it now; otherwise rely on the test's
+# own preflight assertion.
 
 $env:CODEX_ACCEPTANCE_DATA_PATH = "$env:LOCALAPPDATA\CodexUsageWidget-Acceptance"
 mkdir $env:CODEX_ACCEPTANCE_DATA_PATH -Force
