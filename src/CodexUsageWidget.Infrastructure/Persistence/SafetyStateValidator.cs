@@ -59,6 +59,11 @@ public sealed class SafetyStateValidator : ISafetyStateValidator
             connection = await _database.CreateConnectionAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+            // Allow brief waits for concurrent write locks instead of immediately
+            // failing with SQLITE_BUSY, which would otherwise be misclassified as
+            // corruption.
+            await SetBusyTimeoutAsync(connection, cancellationToken).ConfigureAwait(false);
+
             SafetyStateValidationResult integrity =
                 await CheckIntegrityAsync(connection, cancellationToken).ConfigureAwait(false);
             if (!integrity.IsValid)
@@ -103,12 +108,14 @@ public sealed class SafetyStateValidator : ISafetyStateValidator
                 kind,
                 "The safety-state database could not be opened or read: " + ex.SqliteErrorCode);
         }
-        catch (IOException ex)
+        catch (IOException)
         {
             // A filesystem-level read failure distinct from structural corruption.
+            // Do not include the exception message to avoid disclosing the full
+            // database path in failure reasons.
             return SafetyStateValidationResult.Failed(
                 SafetyStateFailureKind.Unreadable,
-                "The safety-state database file could not be read: " + ex.Message);
+                "The safety-state database file could not be read.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -231,6 +238,15 @@ public sealed class SafetyStateValidator : ISafetyStateValidator
     {
         const int sqliteCantOpen = 14;
         return exception.SqliteErrorCode == sqliteCantOpen;
+    }
+
+    private static async Task SetBusyTimeoutAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "PRAGMA busy_timeout = 5000;";
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<string> ExecuteScalarAsStringAsync(
