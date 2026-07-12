@@ -394,7 +394,7 @@ public sealed class QuotaMonitor : IAsyncDisposable
         return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
     }
 
-    private void OnSourceUpdated(object? _, QuotaSnapshot e)
+    private void OnSourceUpdated(object? _, EventArgs e)
     {
         CancellationTokenSource? delayCts;
 

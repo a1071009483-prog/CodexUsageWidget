@@ -7,7 +7,7 @@ internal sealed class FakeQuotaSource : IQuotaSource
 {
     private readonly Queue<QuotaSourceResult> _results = new();
 
-    public event EventHandler<QuotaSnapshot>? Updated;
+    public event EventHandler? Updated;
 
     public int ReadCount { get; private set; }
 
@@ -35,13 +35,5 @@ internal sealed class FakeQuotaSource : IQuotaSource
         return Task.FromResult(_results.Dequeue());
     }
 
-    public void RaiseUpdated(QuotaSnapshot? snapshot = null) =>
-        Updated?.Invoke(this, snapshot ?? new QuotaSnapshot(
-            null,
-            new QuotaBucketSnapshot(QuotaBucket.FiveHour, 0, 100, null, null, false),
-            new QuotaBucketSnapshot(QuotaBucket.Weekly, 0, 100, null, null, false),
-            DateTimeOffset.UtcNow,
-            true,
-            MonitoringConnectionState.Connected,
-            null));
+    public void RaiseUpdated() => Updated?.Invoke(this, EventArgs.Empty);
 }

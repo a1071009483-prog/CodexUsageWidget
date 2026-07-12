@@ -12,8 +12,10 @@ public interface IQuotaSource
 {
     /// <summary>
     /// Raised when a push notification indicates that quota data may have changed.
+    /// The event carries no snapshot because the monitor will call <see cref="ReadAsync"/>
+    /// to fetch the authoritative state.
     /// </summary>
-    event EventHandler<QuotaSnapshot>? Updated;
+    event EventHandler? Updated;
 
     /// <summary>
     /// Fetches the latest quota data from the source.
