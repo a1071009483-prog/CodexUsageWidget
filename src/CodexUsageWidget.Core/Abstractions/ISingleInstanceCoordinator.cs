@@ -20,6 +20,9 @@ public interface ISingleInstanceCoordinator
     /// Only the first-instance owner should call this method. The callback is
     /// invoked on a thread-pool thread whenever a signal arrives.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when this instance does not own the single-instance mutex.
+    /// </exception>
     void StartListening(
         Func<CancellationToken, Task> onBringForward,
         CancellationToken cancellationToken);
@@ -28,6 +31,12 @@ public interface ISingleInstanceCoordinator
     /// Connects to the existing instance and asks it to bring its window forward.
     /// Only valid when <see cref="TryAcquireInstance"/> returned <c>false</c>.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when this instance owns the single-instance mutex.
+    /// </exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the existing instance is not listening on the named pipe.
+    /// </exception>
     Task SignalExistingInstanceAsync(CancellationToken cancellationToken);
 
     /// <summary>

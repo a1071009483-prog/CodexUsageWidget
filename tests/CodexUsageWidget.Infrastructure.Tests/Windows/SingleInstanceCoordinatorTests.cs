@@ -67,11 +67,18 @@ public sealed class SingleInstanceCoordinatorTests
         Assert.True(first.TryAcquireInstance());
         first.ReleaseInstance();
 
-        // Give the kernel a moment to observe the released mutex before the
-        // second instance attempts to open it.
-        Thread.Sleep(50);
+        // The kernel may need a moment to observe the released mutex; poll
+        // instead of a single fixed sleep to keep the test stable under load.
+        bool acquired = false;
+        for (int i = 0; i < 50 && !acquired; i++)
+        {
+            acquired = second.TryAcquireInstance();
+            if (!acquired)
+            {
+                Thread.Sleep(20);
+            }
+        }
 
-        bool acquired = second.TryAcquireInstance();
         Assert.True(acquired);
         second.ReleaseInstance();
     }
@@ -220,11 +227,81 @@ public sealed class SingleInstanceCoordinatorTests
             cts.Token);
 
         coordinator.ReleaseInstance();
-        cts.Cancel();
 
-        // Give the listener loop a moment to observe the cancellation.
-        Thread.Sleep(100);
-        Assert.True(cts.IsCancellationRequested);
+        // After ReleaseInstance returns, the listener loop must have exited so
+        // that a new client connection to the per-user pipe times out.
+        string pipeName = $"{name}_BringForward_{GetCurrentUserToken()}";
+        using NamedPipeClientStream client = new(
+            ".",
+            pipeName,
+            PipeDirection.Out,
+            PipeOptions.Asynchronous);
+
+        Assert.Throws<TimeoutException>(() => client.Connect(500));
+    }
+
+    [Fact]
+    public void SignalExistingInstanceAsyncThrowsTimeoutWhenOwnerNotListening()
+    {
+        string name = UniqueName();
+        SingleInstanceCoordinator first = new(name);
+        Assert.True(first.TryAcquireInstance());
+
+        try
+        {
+            SingleInstanceCoordinator second = new(name);
+            Assert.False(second.TryAcquireInstance());
+
+            Assert.Throws<TimeoutException>(
+                () => second.SignalExistingInstanceAsync(CancellationToken.None)
+                    .GetAwaiter().GetResult());
+        }
+        finally
+        {
+            first.ReleaseInstance();
+        }
+    }
+
+    [Fact]
+    public void StartListeningIsIdempotent()
+    {
+        string name = UniqueName();
+        SingleInstanceCoordinator coordinator = new(name);
+        Assert.True(coordinator.TryAcquireInstance());
+
+        int callCount = 0;
+        TaskCompletionSource signaled = new();
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+
+        coordinator.StartListening(
+            (CancellationToken ct) =>
+            {
+                Interlocked.Increment(ref callCount);
+                signaled.TrySetResult();
+                return Task.CompletedTask;
+            },
+            cts.Token);
+
+        // A second StartListening call must be ignored and must not replace the
+        // already-active listener or its callback.
+        coordinator.StartListening(
+            (CancellationToken ct) => Task.CompletedTask,
+            cts.Token);
+
+        try
+        {
+            SingleInstanceCoordinator signaller = new(name);
+            Assert.False(signaller.TryAcquireInstance());
+            signaller.SignalExistingInstanceAsync(CancellationToken.None)
+                .GetAwaiter().GetResult();
+
+            Assert.True(signaled.Task.Wait(TimeSpan.FromSeconds(5)));
+            Assert.Equal(1, callCount);
+        }
+        finally
+        {
+            coordinator.ReleaseInstance();
+        }
     }
 
     private static string GetCurrentUserToken()

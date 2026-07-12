@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using CodexUsageWidget.Core.Abstractions;
@@ -11,6 +12,13 @@ namespace CodexUsageWidget.Infrastructure.Windows;
 /// Uses a per-user named mutex for ownership and a per-user named pipe for
 /// bring-forward signaling.
 /// </summary>
+/// <remarks>
+/// The named mutex is created in the <c>Local\</c> object namespace, which is
+/// scoped to the current Terminal Services session. On a typical single-user
+/// Windows 10/11 desktop this is equivalent to per-user enforcement; this
+/// component does not attempt to enforce a single instance across multiple
+/// sessions for the same user.
+/// </remarks>
 [SupportedOSPlatform("windows")]
 public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator, IDisposable
 {
@@ -97,7 +105,9 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator, IDis
 
         _listenerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         CancellationToken listenerToken = _listenerCts.Token;
-        _listenerTask = Task.Run(() => ListenAsync(_pipeName, onBringForward, listenerToken), listenerToken);
+        _listenerTask = Task.Run(
+            () => RunListenerAsync(_pipeName, onBringForward, listenerToken),
+            listenerToken);
     }
 
     /// <inheritdoc/>
@@ -135,6 +145,24 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator, IDis
         _listenerCts?.Cancel();
         _listenerCts?.Dispose();
         _listenerCts = null;
+
+        if (_listenerTask is not null)
+        {
+            try
+            {
+                // Give the listener loop a bounded time to observe cancellation and
+                // dispose the active named-pipe server before we release the mutex.
+                _listenerTask.Wait(TimeSpan.FromSeconds(2));
+            }
+            catch (AggregateException)
+            {
+                // Any listener failure was already logged by RunListenerAsync.
+            }
+            finally
+            {
+                _listenerTask = null;
+            }
+        }
 
         if (_ownsMutex && _mutex is not null)
         {
@@ -228,14 +256,56 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator, IDis
         }
     }
 
+    private async Task RunListenerAsync(
+        string pipeName,
+        Func<CancellationToken, Task> onBringForward,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ListenAsync(pipeName, onBringForward, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when ReleaseInstance / Dispose cancels the listener.
+        }
+        catch (Exception ex)
+        {
+            // The listener loop should only exit via cancellation or IOException.
+            // Log any unexpected failure so it does not become an unobserved
+            // task exception and is available for diagnostics.
+            if (_log is not null)
+            {
+                await _log.WriteAsync(
+                    new StructuredLogEvent(
+                        RedactingLogLevel.Warning,
+                        "SingleInstanceListenerUnexpectedFailure",
+                        new Dictionary<string, string?>
+                        {
+                            ["exceptionType"] = ex.GetType().FullName,
+                        }),
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+    }
+
     private static string ComputeCurrentUserToken()
     {
         WindowsIdentity identity = WindowsIdentity.GetCurrent();
-        // Prefer the stable user SID. Fall back to a sanitized name so that
-        // characters illegal in mutex/pipe names (e.g. 'DOMAIN\\user') are removed.
-        string token = identity.User?.Value
-            ?? identity.Name?.Replace("\\", "_", StringComparison.Ordinal)
-            ?? "unknown";
-        return token;
+        if (identity.User is not null)
+        {
+            return identity.User.Value;
+        }
+
+        string fallback = identity.Name;
+        if (!string.IsNullOrEmpty(fallback))
+        {
+            // Hash the normalized name so that characters illegal in mutex or
+            // pipe names cannot leak into the token.
+            byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(fallback));
+            return Convert.ToHexString(hash);
+        }
+
+        return "unknown";
     }
 }
