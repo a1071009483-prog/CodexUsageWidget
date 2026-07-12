@@ -93,7 +93,7 @@ complete. Items marked **automated** are covered by xUnit tests. Items marked
 | 7.3 | Self-contained publish and per-user install/uninstall | `scripts/package.ps1`, `scripts/install.ps1`, `scripts/uninstall.ps1` | ✅ | Build artifacts |
 | 7.4 | Manual install/first-run/startup/pause/upgrade/rollback/uninstall | 🖥️ Manual | ✅ | Executed `scripts/package.ps1`, `install.ps1`, `upgrade.ps1`, `rollback.ps1`, and both `uninstall.ps1` modes; see notes below. |
 | 7.5 | Authenticated read-only smoke test | `ReadOnlyAuthenticatedSmokeTest.cs` | ✅ | Passed against real Codex CLI on Windows; see notes below. |
-| 7.6 | Real activation acceptance test | `RealActivationAcceptanceTest.cs` | ⏳ | Pending explicit user approval. |
+| 7.6 | Real activation acceptance test | `RealActivationAcceptanceTest.cs` | ⏳ | Approved, but blocked on ChatGPT authentication (`codex login`). Test failed fast before any `turn/start`. |
 | 7.7 | Full automated suite and final acceptance matrix | 🖥️ Manual + automated | ✅ | `dotnet test CodexUsageWidget.sln` passes; spot-checks covered by fake-server E2E and smoke test. |
 | 7.8 | User documentation | `docs/install.md`, `docs/usage.md`, `docs/security.md`, `docs/troubleshooting.md` | ✅ | This repo |
 
