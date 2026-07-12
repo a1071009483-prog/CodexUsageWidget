@@ -115,33 +115,12 @@ public sealed class WindowPlacementService : IWindowPlacementService
         double width = Math.Max(MinVisibleSize, Math.Min(placement.Width, screen.Width));
         double height = Math.Max(MinVisibleSize, Math.Min(placement.Height, screen.Height));
 
-        double left = placement.Left;
-        double top = placement.Top;
-
-        // Ensure a minimum visible edge remains on screen.
-        double right = left + width;
-        double bottom = top + height;
-
-        if (right < screen.Left + MinVisibleSize)
-        {
-            left = screen.Left + MinVisibleSize - width;
-        }
-        else if (left > screen.Left + screen.Width - MinVisibleSize)
-        {
-            left = screen.Left + screen.Width - MinVisibleSize;
-        }
-
-        if (bottom < screen.Top + MinVisibleSize)
-        {
-            top = screen.Top + MinVisibleSize - height;
-        }
-        else if (top > screen.Top + screen.Height - MinVisibleSize)
-        {
-            top = screen.Top + screen.Height - MinVisibleSize;
-        }
-
-        left = Math.Max(left, screen.Left - width + MinVisibleSize);
-        top = Math.Max(top, screen.Top - height + MinVisibleSize);
+        // Keep the entire window within the screen when it fits; otherwise keep
+        // it flush with the nearest edge so the whole widget remains reachable.
+        double maxLeft = screen.Left + screen.Width - width;
+        double maxTop = screen.Top + screen.Height - height;
+        double left = Math.Clamp(placement.Left, screen.Left, maxLeft);
+        double top = Math.Clamp(placement.Top, screen.Top, maxTop);
 
         return new WindowPlacement(left, top, width, height);
     }

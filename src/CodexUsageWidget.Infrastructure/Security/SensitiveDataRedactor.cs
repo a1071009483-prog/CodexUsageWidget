@@ -27,6 +27,7 @@ public static class SensitiveDataRedactor
         "workspace_path",
         "prompt",
         "response",
+        "turnoutput",
     ];
 
     private static readonly Regex BearerOrKeyPattern = new(

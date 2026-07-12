@@ -179,7 +179,7 @@ public sealed class SensitiveDataScanTests : IDisposable
 
         string export = JsonSerializer.Serialize(entries);
         SensitiveDataAsserts.AssertContainsNoSensitiveData(export);
-        Assert.Contains("\"namespaceHash\":\"", export, StringComparison.Ordinal);
+        Assert.Contains("\"NamespaceHash\":\"", export, StringComparison.Ordinal);
         Assert.DoesNotContain(rawToken, export, StringComparison.Ordinal);
     }
 

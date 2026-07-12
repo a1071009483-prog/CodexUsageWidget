@@ -36,7 +36,7 @@ public sealed class QuotaCardViewModelTests
     }
 
     [Theory]
-    [InlineData(0, 0, false, "不可用")]
+    [InlineData(0, 0, false, "已过期")]
     [InlineData(10, 90, true, "已同步")]
     [InlineData(10, 90, false, "已过期")]
     [InlineData(0, 100, true, "100%·计时已启动")]

@@ -89,6 +89,13 @@ public sealed class FakeAppServerScriptBuilder
         return this;
     }
 
+    /// <summary>Writes the value of an environment variable to stdout as a raw line.</summary>
+    public FakeAppServerScriptBuilder WriteEnvironmentVariable(string envVarName)
+    {
+        _steps.Add(new { writeEnvironmentVariable = envVarName });
+        return this;
+    }
+
     /// <summary>Exits the fake server with the given code.</summary>
     public FakeAppServerScriptBuilder Exit(int code)
     {

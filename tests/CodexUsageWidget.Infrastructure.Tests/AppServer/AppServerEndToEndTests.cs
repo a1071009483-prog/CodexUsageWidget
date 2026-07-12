@@ -71,14 +71,11 @@ public sealed class AppServerEndToEndTests : IDisposable
     public async Task SupervisorRestartsAfterUnexpectedExit()
     {
         // The fake server completes one handshake+read cycle and then exits. The
-        // supervisor must start a second process to satisfy a later read.
+        // supervisor must start a second process so that a later read can succeed.
         var script = new FakeAppServerScriptBuilder()
             .Handshake(InitializeResult())
             .ExpectRequest("account/rateLimits/read", RateLimitsResult(usedPercent: 10))
-            .Exit(1)
-            .Handshake(InitializeResult())
-            .ExpectRequest("account/rateLimits/read", RateLimitsResult(usedPercent: 11))
-            .HangAfterEof();
+            .Exit(1);
 
         AppServerSupervisor supervisor = CreateSupervisor(script, healthyIntervalSeconds: 60);
 
@@ -88,17 +85,19 @@ public sealed class AppServerEndToEndTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         Task startTask = supervisor.StartAsync(cts.Token);
 
-        await WaitForSessionsAsync(sessions, count: 2, timeout: TimeSpan.FromSeconds(20));
+        await WaitForSessionsAsync(sessions, count: 1, timeout: TimeSpan.FromSeconds(10));
 
         RateLimitsReadResponse first = await sessions[0].Session.Gateway
             .ReadRateLimitsAsync(CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(10, first.RateLimits.Primary!.UsedPercent);
 
+        await WaitForSessionsAsync(sessions, count: 2, timeout: TimeSpan.FromSeconds(20), supervisorForDiagnostics: supervisor);
+
         RateLimitsReadResponse second = await sessions[1].Session.Gateway
             .ReadRateLimitsAsync(CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(11, second.RateLimits.Primary!.UsedPercent);
+        Assert.Equal(10, second.RateLimits.Primary!.UsedPercent);
 
         await supervisor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
         await startTask.WaitAsync(TimeSpan.FromSeconds(10));
@@ -136,24 +135,32 @@ public sealed class AppServerEndToEndTests : IDisposable
     [Fact]
     public async Task SupervisorSkipsRetiredGenerationFrames()
     {
-        // gen1: handshake, emit a notification, then stay alive long enough for us
-        // to read it, then exit. gen2: handshake, emit a different notification.
+        // Each fresh fake-server process reads the same script from the start, so we
+        // drive the per-generation notification value through an environment variable.
+        // gen1 emits usedPercent 7 and exits; after we observe it we change the env var
+        // to 8 so gen2 emits a different notification. Any late frame from gen1 must be
+        // dropped by the supervisor.
+        const string envName = "FAKE_CODEX_NOTIFY_VALUE";
+        Environment.SetEnvironmentVariable(
+            envName,
+            NotificationLine(usedPercent: 7));
+
         var script = new FakeAppServerScriptBuilder()
             .Handshake(InitializeResult())
-            .EmitNotification(
-                "account/rateLimits/updated",
-                new { rateLimits = new { primary = new { usedPercent = 7 } } })
-            .Exit(0)
-            .Handshake(InitializeResult())
-            .EmitNotification(
-                "account/rateLimits/updated",
-                new { rateLimits = new { primary = new { usedPercent = 8 } } })
-            .HangAfterEof();
+            .WriteEnvironmentVariable(envName)
+            .Exit(0);
 
         AppServerSupervisor supervisor = CreateSupervisor(script, healthyIntervalSeconds: 60);
 
         var notifications = new List<RateLimitSnapshot>();
-        supervisor.RateLimitsUpdated += (_, args) => notifications.Add(args.RateLimits);
+        supervisor.RateLimitsUpdated += (_, args) =>
+        {
+            notifications.Add(args.RateLimits);
+            if (notifications.Count == 1)
+            {
+                Environment.SetEnvironmentVariable(envName, NotificationLine(usedPercent: 8));
+            }
+        };
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         Task startTask = supervisor.StartAsync(cts.Token);
@@ -183,6 +190,19 @@ public sealed class AppServerEndToEndTests : IDisposable
             primary = new { usedPercent },
         },
     };
+
+    private static string NotificationLine(int usedPercent) =>
+        JsonSerializer.Serialize(new
+        {
+            method = "account/rateLimits/updated",
+            @params = new
+            {
+                rateLimits = new
+                {
+                    primary = new { usedPercent },
+                },
+            },
+        });
 
     private AppServerProcess CreateProcess(FakeAppServerScriptBuilder script)
     {
@@ -231,15 +251,19 @@ public sealed class AppServerEndToEndTests : IDisposable
     private static async Task WaitForSessionsAsync(
         List<AppServerGenerationSession> sessions,
         int count,
-        TimeSpan timeout)
+        TimeSpan timeout,
+        AppServerSupervisor? supervisorForDiagnostics = null)
     {
         DateTime deadline = DateTime.UtcNow + timeout;
         while (sessions.Count < count)
         {
             if (DateTime.UtcNow >= deadline)
             {
+                string diag = supervisorForDiagnostics is null
+                    ? string.Empty
+                    : $" CurrentGeneration={supervisorForDiagnostics.CurrentGeneration?.GenerationId.ToString(CultureInfo.InvariantCulture) ?? "null"}.";
                 throw new TimeoutException(
-                    $"Expected {count} sessions but observed {sessions.Count}.");
+                    $"Expected {count} sessions but observed {sessions.Count}.{diag}");
             }
 
             await Task.Delay(TimeSpan.FromMilliseconds(20));

@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using System.Text;
 using Xunit;
 
@@ -46,6 +47,7 @@ internal static class SensitiveDataAsserts
     {
         string dbPath = Path.Combine(databaseDirectory, "state.db");
         Assert.True(File.Exists(dbPath), "Expected SQLite database file to exist.");
+        SqliteConnection.ClearAllPools();
         byte[] bytes = File.ReadAllBytes(dbPath);
         return Encoding.UTF8.GetString(bytes);
     }
