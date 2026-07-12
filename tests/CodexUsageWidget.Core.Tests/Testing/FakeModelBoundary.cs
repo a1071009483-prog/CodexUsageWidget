@@ -13,4 +13,10 @@ internal sealed class FakeModelBoundary : IModelBoundary
         CallCount++;
         return Task.FromResult(new ModelGenerationResult(false, false, FailureCategory: "Unexpected call"));
     }
+
+    public Task InterruptTurnAsync(string threadId, string turnId, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
+
+    public Task DeleteThreadAsync(string threadId, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
 }
