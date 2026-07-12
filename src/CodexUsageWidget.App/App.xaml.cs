@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Windows;
 using System.Windows.Forms;
+using System.Windows.Threading;
 using CodexUsageWidget.App.Services;
 using CodexUsageWidget.App.ViewModels;
 using CodexUsageWidget.App.Views;
@@ -33,6 +34,7 @@ public partial class App : System.Windows.Application
     private QuotaMonitor? _monitor;
     private SingleInstanceCoordinator? _singleInstance;
     private JsonSettingsStore? _settingsStore;
+    private CrashReportWriter? _crashReportWriter;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -41,6 +43,18 @@ public partial class App : System.Windows.Application
 
         string executablePath = Process.GetCurrentProcess().MainModule?.FileName
             ?? System.IO.Path.Combine(AppContext.BaseDirectory, $"{AppName}.exe");
+
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string crashesDirectory = System.IO.Path.Combine(localAppData, AppName, "crashes");
+
+        IAppFileSystem fileSystem = new LocalAppFileSystem();
+        IClock clock = new SystemClock();
+        _crashReportWriter = new CrashReportWriter(
+            fileSystem,
+            clock,
+            crashesDirectory,
+            AppName);
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
 
         _singleInstance = new SingleInstanceCoordinator(AppName, new NullRedactingLog());
         if (!_singleInstance.TryAcquireInstance())
@@ -59,7 +73,6 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        IAppFileSystem fileSystem = new LocalAppFileSystem();
         IWindowPlacementService placementService = new WindowPlacementService(fileSystem);
         IStartupRegistration startupRegistration = new StartupRegistration(
             AppName,
@@ -79,7 +92,6 @@ public partial class App : System.Windows.Application
         _trayIconService = trayIconService;
 
         IUserNotifier notifier = new WindowsNotificationService(notifyIcon);
-        IClock clock = new SystemClock();
         IDelay delay = new TaskDelay();
         IQuotaSource quotaSource = new DesignQuotaSource();
         IActivationCoordinator activationCoordinator = new NoOpActivationCoordinator();
@@ -196,6 +208,23 @@ public partial class App : System.Windows.Application
                 _mainViewModel.IsAutomationEnabled);
             _ = _settingsStore.SaveAsync(updated);
         }
+    }
+    private async void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        e.Handled = true;
+        if (_crashReportWriter is not null)
+        {
+            try
+            {
+                await _crashReportWriter.WriteAsync(e.Exception, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Non-fatal: the original exception is already unhandled.
+            }
+        }
+
+        Shutdown();
     }
 }
 #pragma warning restore CA1001

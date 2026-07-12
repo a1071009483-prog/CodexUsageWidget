@@ -1,40 +1,12 @@
 using System.Globalization;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using CodexUsageWidget.Core.Abstractions;
+using CodexUsageWidget.Infrastructure.Security;
 
 namespace CodexUsageWidget.Infrastructure.Logging;
 
 public sealed class JsonRedactingLogger : IRedactingLog, IDisposable
 {
-    private const string RedactedValue = "[REDACTED]";
-
-    private static readonly string[] SensitiveKeyFragments =
-    [
-        "token",
-        "secret",
-        "credential",
-        "cookie",
-        "password",
-        "authorization",
-        "email",
-        "workspace_path",
-        "prompt",
-        "response",
-    ];
-
-    private static readonly Regex BearerOrKeyPattern = new(
-        @"(?i)(?:\bbearer\s+\S+|\bsk-[a-z0-9_-]{6,})",
-        RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
-    private static readonly Regex EmailPattern = new(
-        @"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
-    private static readonly Regex AbsolutePathPattern = new(
-        @"(?i)(?:\b[A-Z]:\\|(?:^|\s)/(?:users|home|var|tmp|etc)/)",
-        RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
     private readonly TextWriter _output;
     private readonly IClock _clock;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -81,23 +53,17 @@ public sealed class JsonRedactingLogger : IRedactingLog, IDisposable
 
         foreach ((string key, string? value) in properties)
         {
-            if (SensitiveKeyFragments.Any(
+            if (SensitiveDataRedactor.SensitiveKeyFragments.Any(
                     fragment => key.Contains(fragment, StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }
 
-            safe[key] = IsSensitiveValue(value) ? RedactedValue : value;
+            safe[key] = SensitiveDataRedactor.Redact(value);
         }
 
         return safe;
     }
-
-    private static bool IsSensitiveValue(string? value) =>
-        value is not null
-        && (BearerOrKeyPattern.IsMatch(value)
-            || EmailPattern.IsMatch(value)
-            || AbsolutePathPattern.IsMatch(value));
 
     public void Dispose() => _writeGate.Dispose();
 }
