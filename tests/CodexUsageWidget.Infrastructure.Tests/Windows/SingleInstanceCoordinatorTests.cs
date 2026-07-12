@@ -1,5 +1,7 @@
 using System.IO.Pipes;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using CodexUsageWidget.Infrastructure.Windows;
 using Xunit;
@@ -306,9 +308,21 @@ public sealed class SingleInstanceCoordinatorTests
 
     private static string GetCurrentUserToken()
     {
-        System.Security.Principal.WindowsIdentity identity =
-            System.Security.Principal.WindowsIdentity.GetCurrent();
-        return identity.User?.Value ?? identity.Name ?? "unknown";
+        WindowsIdentity identity = WindowsIdentity.GetCurrent();
+        if (identity.User is not null)
+        {
+            return identity.User.Value;
+        }
+
+        string fallback = identity.Name;
+        if (!string.IsNullOrEmpty(fallback))
+        {
+            byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(fallback));
+            return Convert.ToHexString(hash);
+        }
+
+        throw new InvalidOperationException(
+            "Unable to determine the current Windows user token.");
     }
 }
 

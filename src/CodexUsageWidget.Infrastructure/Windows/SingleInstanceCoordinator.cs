@@ -265,10 +265,6 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator, IDis
         {
             await ListenAsync(pipeName, onBringForward, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            // Expected when ReleaseInstance / Dispose cancels the listener.
-        }
         catch (Exception ex)
         {
             // The listener loop should only exit via cancellation or IOException.
@@ -306,6 +302,7 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator, IDis
             return Convert.ToHexString(hash);
         }
 
-        return "unknown";
+        throw new InvalidOperationException(
+            "Unable to determine the current Windows user token.");
     }
 }
