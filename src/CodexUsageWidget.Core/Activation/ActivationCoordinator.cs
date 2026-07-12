@@ -78,6 +78,8 @@ public sealed class ActivationCoordinator : IActivationCoordinator
         }
 
         string? attemptId = null;
+        string? namespaceHash = null;
+        QuotaSnapshot? confirmed = null;
 
         try
         {
@@ -93,7 +95,7 @@ public sealed class ActivationCoordinator : IActivationCoordinator
                 return ActivationResult.NotEligible(eligibility.Reason);
             }
 
-            string namespaceHash = await _namespaceHasher.GetNamespaceHashAsync(
+            namespaceHash = await _namespaceHasher.GetNamespaceHashAsync(
                 identity,
                 cancellationToken).ConfigureAwait(false);
 
@@ -103,7 +105,7 @@ public sealed class ActivationCoordinator : IActivationCoordinator
                 await _delay.DelayAsync(_options.ConfirmationDebounce, cancellationToken).ConfigureAwait(false);
             }
 
-            QuotaSnapshot? confirmed = await FetchSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            confirmed = await FetchSnapshotAsync(cancellationToken).ConfigureAwait(false);
             if (confirmed is null)
             {
                 return ActivationResult.NotEligible("refetch-failed");
@@ -217,14 +219,37 @@ public sealed class ActivationCoordinator : IActivationCoordinator
 
             // Final preflight immediately before any model consumption.
             QuotaSnapshot? finalPreflight = await FetchSnapshotAsync(cancellationToken).ConfigureAwait(false);
-            if (finalPreflight is null
-                || !ActivationEligibility.Evaluate(
+            if (finalPreflight is null)
+            {
+                const string FinalPreflightUnavailable = "final-preflight-unavailable";
+                await MarkTerminalAsync(
+                    attemptId,
+                    OutcomeFailed,
+                    confirmed,
+                    "none",
+                    cancellationToken,
+                    errorCategory: FinalPreflightUnavailable).ConfigureAwait(false);
+                await WriteAuditAsync(
+                    attemptId,
+                    namespaceHash,
+                    modelId: null,
+                    preSnapshot: confirmed,
+                    postSnapshot: null,
+                    turnCrossedBoundary: false,
+                    OutcomeFailed,
+                    FinalPreflightUnavailable,
+                    cancellationToken).ConfigureAwait(false);
+                await NotifyOnceAsync(OutcomeFailed, attemptId, cancellationToken).ConfigureAwait(false);
+                return ActivationResult.Failed(FinalPreflightUnavailable, "quota-source-unavailable", attemptId);
+            }
+
+            if (!ActivationEligibility.Evaluate(
                     finalPreflight,
                     automationEnabled: true,
                     activeAttempt: null,
                     _clock.UtcNow).IsEligible)
             {
-                QuotaSnapshot postSnapshot = finalPreflight ?? confirmed;
+                QuotaSnapshot postSnapshot = finalPreflight;
                 await MarkTerminalAsync(
                     attemptId,
                     OutcomeExternallySatisfied,
@@ -528,10 +553,35 @@ public sealed class ActivationCoordinator : IActivationCoordinator
         }
         catch (Exception exception)
         {
+            string failedAttemptId = attemptId ?? Guid.NewGuid().ToString();
+            string caughtErrorCategory = RedactErrorCategory(exception);
+            QuotaSnapshot preSnapshot = confirmed ?? snapshot;
+
+            await MarkTerminalAsync(
+                failedAttemptId,
+                OutcomeFailed,
+                preSnapshot,
+                "none",
+                cancellationToken,
+                errorCategory: caughtErrorCategory).ConfigureAwait(false);
+
+            await WriteAuditAsync(
+                failedAttemptId,
+                namespaceHash ?? "namespace-unavailable",
+                modelId: null,
+                preSnapshot: preSnapshot,
+                postSnapshot: null,
+                turnCrossedBoundary: false,
+                OutcomeFailed,
+                caughtErrorCategory,
+                cancellationToken).ConfigureAwait(false);
+
+            await NotifyOnceAsync(OutcomeFailed, failedAttemptId, cancellationToken).ConfigureAwait(false);
+
             return ActivationResult.Failed(
                 "activation-unexpected-failure",
-                RedactErrorCategory(exception),
-                attemptId);
+                caughtErrorCategory,
+                failedAttemptId);
         }
     }
 

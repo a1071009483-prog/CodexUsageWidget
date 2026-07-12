@@ -6,10 +6,25 @@ internal sealed class FakeActivationLockStore : IActivationLockStore
 {
     private readonly Dictionary<string, ActivationAttempt> _byKey = new();
     private readonly Dictionary<string, ActivationAttempt> _byAttempt = new();
+    private readonly object _sync = new();
 
     public Exception? ExceptionToThrow { get; set; }
+    public Exception? ExceptionOnGetActive { get; set; }
+    public Exception? ExceptionOnTryAcquire { get; set; }
+    public Exception? ExceptionOnMarkTurnStarted { get; set; }
+    public Exception? ExceptionOnMarkTerminal { get; set; }
+    public Exception? ExceptionOnExtendSuppressionDeadline { get; set; }
 
-    public IReadOnlyDictionary<string, ActivationAttempt> Attempts => _byAttempt;
+    public IReadOnlyDictionary<string, ActivationAttempt> Attempts
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return new Dictionary<string, ActivationAttempt>(_byAttempt);
+            }
+        }
+    }
 
     private static string Key(string ns, string scope, string window) => $"{ns}|{scope}|{window}";
 
@@ -17,16 +32,19 @@ internal sealed class FakeActivationLockStore : IActivationLockStore
         ActivationAttempt attempt,
         CancellationToken cancellationToken)
     {
-        ThrowIfRequested();
+        ThrowIfRequested(ExceptionOnTryAcquire);
         string key = Key(attempt.NamespaceHash, attempt.WorkspaceScope, attempt.WindowKey);
-        if (_byKey.TryGetValue(key, out ActivationAttempt? existing))
+        lock (_sync)
         {
-            return Task.FromResult(new AcquisitionResult(false, existing));
-        }
+            if (_byKey.TryGetValue(key, out ActivationAttempt? existing))
+            {
+                return Task.FromResult(new AcquisitionResult(false, existing));
+            }
 
-        _byKey[key] = attempt;
-        _byAttempt[attempt.AttemptId] = attempt;
-        return Task.FromResult(new AcquisitionResult(true, null));
+            _byKey[key] = attempt;
+            _byAttempt[attempt.AttemptId] = attempt;
+            return Task.FromResult(new AcquisitionResult(true, null));
+        }
     }
 
     public Task<ActivationAttempt?> GetActiveAsync(
@@ -35,18 +53,25 @@ internal sealed class FakeActivationLockStore : IActivationLockStore
         string windowKey,
         CancellationToken cancellationToken)
     {
-        ThrowIfRequested();
-        _byKey.TryGetValue(Key(namespaceHash, workspaceScope, windowKey), out ActivationAttempt? attempt);
-        return Task.FromResult(attempt);
+        ThrowIfRequested(ExceptionOnGetActive);
+        lock (_sync)
+        {
+            _byKey.TryGetValue(Key(namespaceHash, workspaceScope, windowKey), out ActivationAttempt? attempt);
+            return Task.FromResult(attempt);
+        }
     }
 
     public Task MarkTurnStartedAsync(string attemptId, CancellationToken cancellationToken)
     {
-        ThrowIfRequested();
-        if (_byAttempt.TryGetValue(attemptId, out ActivationAttempt? attempt))
+        ThrowIfRequested(ExceptionOnMarkTurnStarted);
+        lock (_sync)
         {
-            _byAttempt[attemptId] = attempt with { TurnStarted = true };
-            _byKey[Key(attempt.NamespaceHash, attempt.WorkspaceScope, attempt.WindowKey)] = _byAttempt[attemptId];
+            if (_byAttempt.TryGetValue(attemptId, out ActivationAttempt? attempt))
+            {
+                ActivationAttempt updated = attempt with { TurnStarted = true };
+                _byAttempt[attemptId] = updated;
+                _byKey[Key(attempt.NamespaceHash, attempt.WorkspaceScope, attempt.WindowKey)] = updated;
+            }
         }
 
         return Task.CompletedTask;
@@ -60,18 +85,21 @@ internal sealed class FakeActivationLockStore : IActivationLockStore
         string cleanupState,
         CancellationToken cancellationToken)
     {
-        ThrowIfRequested();
-        if (_byAttempt.TryGetValue(attemptId, out ActivationAttempt? attempt))
+        ThrowIfRequested(ExceptionOnMarkTerminal);
+        lock (_sync)
         {
-            ActivationAttempt updated = attempt with
+            if (_byAttempt.TryGetValue(attemptId, out ActivationAttempt? attempt))
             {
-                TerminalOutcome = terminalOutcome,
-                PostUsedPercent = postUsedPercent,
-                PostResetsAt = postResetsAt,
-                CleanupState = cleanupState,
-            };
-            _byAttempt[attemptId] = updated;
-            _byKey[Key(updated.NamespaceHash, updated.WorkspaceScope, updated.WindowKey)] = updated;
+                ActivationAttempt updated = attempt with
+                {
+                    TerminalOutcome = terminalOutcome,
+                    PostUsedPercent = postUsedPercent,
+                    PostResetsAt = postResetsAt,
+                    CleanupState = cleanupState,
+                };
+                _byAttempt[attemptId] = updated;
+                _byKey[Key(updated.NamespaceHash, updated.WorkspaceScope, updated.WindowKey)] = updated;
+            }
         }
 
         return Task.CompletedTask;
@@ -82,22 +110,26 @@ internal sealed class FakeActivationLockStore : IActivationLockStore
         string newSuppressionDeadline,
         CancellationToken cancellationToken)
     {
-        ThrowIfRequested();
-        if (_byAttempt.TryGetValue(attemptId, out ActivationAttempt? attempt))
+        ThrowIfRequested(ExceptionOnExtendSuppressionDeadline);
+        lock (_sync)
         {
-            ActivationAttempt updated = attempt with { SuppressionDeadline = newSuppressionDeadline };
-            _byAttempt[attemptId] = updated;
-            _byKey[Key(updated.NamespaceHash, updated.WorkspaceScope, updated.WindowKey)] = updated;
+            if (_byAttempt.TryGetValue(attemptId, out ActivationAttempt? attempt))
+            {
+                ActivationAttempt updated = attempt with { SuppressionDeadline = newSuppressionDeadline };
+                _byAttempt[attemptId] = updated;
+                _byKey[Key(updated.NamespaceHash, updated.WorkspaceScope, updated.WindowKey)] = updated;
+            }
         }
 
         return Task.CompletedTask;
     }
 
-    private void ThrowIfRequested()
+    private void ThrowIfRequested(Exception? specific)
     {
-        if (ExceptionToThrow is not null)
+        Exception? toThrow = specific ?? ExceptionToThrow;
+        if (toThrow is not null)
         {
-            throw ExceptionToThrow;
+            throw toThrow;
         }
     }
 }

@@ -191,6 +191,35 @@ public sealed class ActivationCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task FinalPreflightUnavailableFailsClosed()
+    {
+        _quotaSource.EnqueueSuccess(Raw(0, null));
+
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, null),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
+
+        Assert.Equal(ActivationOutcome.Failed, result.Outcome);
+        Assert.Equal("quota-source-unavailable", result.ErrorCategory);
+        Assert.Empty(_modelBoundary.StartCalls);
+        Assert.Single(_notifier.Calls);
+        Assert.Single(_auditStore.Entries);
+        AuditEntry audit = _auditStore.Entries.Values.Single();
+        Assert.Equal("failed", audit.Outcome);
+        Assert.Equal("final-preflight-unavailable", audit.ErrorCategory);
+        Assert.False(audit.TurnCrossedBoundary);
+
+        ActivationAttempt attempt = _lockStore.Attempts.Values.Single();
+        Assert.Equal("failed", attempt.TerminalOutcome);
+        Assert.False(attempt.TurnStarted);
+    }
+
+    [Fact]
     public async Task NoModelReturnsFail()
     {
         EnqueueConfirmationSnapshots(Raw(0, null));
@@ -454,6 +483,141 @@ public sealed class ActivationCoordinatorTests : IDisposable
 
     private static long Future(int seconds) =>
         Now.AddSeconds(seconds).ToUnixTimeSeconds();
+
+    [Fact]
+    public async Task MarkTurnStartedFailureFailsClosedWithAuditAndNotification()
+    {
+        EnqueueConfirmationSnapshots(
+            Raw(0, null),
+            Raw(0, null));
+
+        _modelBoundary.OnStart = (_, _) =>
+            new ModelGenerationResult(true, true, ThreadId: "thread-ms", TurnId: "turn-ms");
+        _lockStore.ExceptionOnMarkTurnStarted = new InvalidOperationException("mark failed");
+
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, null),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
+
+        Assert.Equal(ActivationOutcome.Failed, result.Outcome);
+        Assert.Equal("InvalidOperationException", result.ErrorCategory);
+        Assert.Single(_modelBoundary.StartCalls);
+        Assert.Single(_notifier.Calls);
+        Assert.Single(_auditStore.Entries);
+        AuditEntry audit = _auditStore.Entries.Values.Single();
+        Assert.True(audit.TurnCrossedBoundary);
+        Assert.Equal("failed", audit.Outcome);
+        Assert.Equal("InvalidOperationException", audit.ErrorCategory);
+
+        ActivationAttempt attempt = _lockStore.Attempts.Values.Single();
+        Assert.Equal("failed", attempt.TerminalOutcome);
+        Assert.False(attempt.TurnStarted);
+    }
+
+    [Fact]
+    public async Task ConcurrentActivationsOnlyOneCrossesBoundary()
+    {
+        EnqueueConfirmationSnapshots(
+            Raw(0, null),
+            Raw(0, null),
+            Raw(0, null),
+            Raw(0, null));
+        EnqueueVerificationSnapshot(Raw(0, Future(5 * 60 * 60 - 60)));
+
+        _modelBoundary.OnStart = (_, _) =>
+            new ModelGenerationResult(true, true, ThreadId: "thread-concurrent", TurnId: "turn-concurrent");
+
+        Task<ActivationResult> task1 = _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, null),
+            new ActivationRequest(true));
+        Task<ActivationResult> task2 = _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, null),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(5));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult[] results = await Task.WhenAll(task1, task2);
+
+        Assert.Single(results, r => r.IsSuccess);
+        Assert.Single(results, r => r.Outcome == ActivationOutcome.Suppressed);
+        Assert.Single(_modelBoundary.StartCalls);
+        Assert.Single(_auditStore.Entries);
+        Assert.Single(_notifier.Calls);
+    }
+
+    [Fact]
+    public async Task CrashBetweenLockAcquisitionAndTurnStartFailsClosed()
+    {
+        EnqueueConfirmationSnapshots(
+            Raw(0, null),
+            Raw(0, null));
+        _modelCatalog.ExceptionToThrow = new InvalidOperationException("catalog down");
+
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, null),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
+
+        Assert.Equal(ActivationOutcome.Failed, result.Outcome);
+        Assert.Equal("InvalidOperationException", result.ErrorCategory);
+        Assert.Empty(_modelBoundary.StartCalls);
+        Assert.Single(_notifier.Calls);
+        Assert.Single(_auditStore.Entries);
+        AuditEntry audit = _auditStore.Entries.Values.Single();
+        Assert.False(audit.TurnCrossedBoundary);
+        Assert.Equal("failed", audit.Outcome);
+
+        ActivationAttempt attempt = _lockStore.Attempts.Values.Single();
+        Assert.Equal("failed", attempt.TerminalOutcome);
+        Assert.False(attempt.TurnStarted);
+    }
+
+    [Fact]
+    public async Task CrashBetweenVerificationAndCleanupStillAuditsAndNotifies()
+    {
+        EnqueueConfirmationSnapshots(
+            Raw(0, null),
+            Raw(0, null));
+        EnqueueVerificationSnapshot(Raw(0, Future(5 * 60 * 60 - 60)));
+
+        _modelBoundary.OnStart = (_, _) =>
+            new ModelGenerationResult(true, true, ThreadId: "thread-cleanup", TurnId: "turn-cleanup");
+        _modelBoundary.OnDelete = (_, _) => throw new InvalidOperationException("delete failed");
+        _cleanupStore.ExceptionToThrow = new InvalidOperationException("cleanup down");
+
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, null),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(5));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(_notifier.Calls);
+        Assert.Single(_auditStore.Entries);
+        AuditEntry audit = _auditStore.Entries.Values.Single();
+        Assert.Equal("succeeded", audit.Outcome);
+
+        ActivationAttempt attempt = _lockStore.Attempts.Values.Single();
+        Assert.Equal("deferred-failed", attempt.CleanupState);
+    }
 
     public void Dispose() => _delay.Dispose();
 }
