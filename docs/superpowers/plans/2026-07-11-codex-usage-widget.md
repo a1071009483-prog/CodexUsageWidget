@@ -116,11 +116,11 @@
 - Consumes: fresh `QuotaSnapshot`, `ISafetyStateStore`, `IModelCatalog`, `IModelBoundary`, `IClock`, `IDelay`, `IUserNotifier`.
 - Produces: immutable `ActivationStatus`; one guarded temporary-thread lifecycle; redacted terminal audit and cleanup work.
 
-- [ ] Write failing model policy tests for recognized lightweight semantic versions, unavailable entries, default fallback, multiple/absent defaults, refreshed catalog, and explicit pre-generation unavailability.
-- [ ] Write failing eligibility/coordination tests for exact-zero freshness, weekly non-gating, two consecutive confirmations, transactional lock before any thread, final preflight, external satisfaction, fixed no-tool/read-only/noninteractive request, accepted boundary, timeout/tool interrupt, changed-future-reset verification, delete/deferred cleanup, and notification dedupe.
-- [ ] Write failing concurrency/crash tests at lock, thread creation, request send, accepted/started, verification, audit, and cleanup boundaries; assert at most one actual `turn/start` and no retry after ambiguity.
-- [ ] Implement the curated updateable lightweight policy, coordinator, and App Server model boundary with a compiled constant response contract and an empty read-only activation directory.
-- [ ] Run activation tests repeatedly and in parallel; verify all safety invariants remain GREEN.
+- [x] Write failing model policy tests for recognized lightweight semantic versions, unavailable entries, default fallback, multiple/absent defaults, refreshed catalog, and explicit pre-generation unavailability.
+- [x] Write failing eligibility/coordination tests for exact-zero freshness, weekly non-gating, two consecutive confirmations, transactional lock before any thread, final preflight, external satisfaction, fixed no-tool/read-only/noninteractive request, accepted boundary, timeout/tool interrupt, changed-future-reset verification, delete/deferred cleanup, and notification dedupe.
+- [x] Write failing concurrency/crash tests at lock, thread creation, request send, accepted/started, verification, audit, and cleanup boundaries; assert at most one actual `turn/start` and no retry after ambiguity.
+- [x] Implement the curated updateable lightweight policy, coordinator, and App Server model boundary with a compiled constant response contract and an empty read-only activation directory.
+- [x] Run activation tests repeatedly and in parallel; verify all safety invariants remain GREEN.
 
 ### Task 6: WPF floating widget, tray, startup, and audit UX
 

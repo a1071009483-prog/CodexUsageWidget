@@ -34,16 +34,16 @@
 
 ## 5. Guarded Five-Hour Window Activation
 
-- [ ] 5.1 Implement an updateable lightweight-model family policy that selects the newest recognized available lightweight model from `model/list` and otherwise selects the current `isDefault = true` model.
-- [ ] 5.2 Implement activation eligibility for enabled automation, a fresh exact `usedPercent = 0` five-hour bucket, no already-active verified timer, and no active scoped suppression lock, without applying a weekly threshold.
-- [ ] 5.3 Implement two consecutive authoritative confirmations, transactional lock acquisition, and the final read-only preflight that cancels activation when external Codex activity has already started the window, without claiming source attribution.
-- [ ] 5.4 Construct a fresh isolated temporary thread in an empty read-only working directory with non-interactive approvals, lowest supported reasoning, no client-supplied dynamic tools, and a constant minimal fixed-response request.
-- [ ] 5.5 Implement model fallback only for an explicit pre-generation model-unavailable rejection; refresh the catalog under the same lock and permanently close fallback once a turn may have started.
-- [ ] 5.6 Implement turn lifecycle handling, accepted-generation boundary auditing, timeout interruption, unexpected-tool interruption, and the no-retry rule for failed or ambiguous outcomes.
-- [ ] 5.7 Verify activation through a changed fresh future five-hour `resetsAt` within a 60-second read-only observation period, independent of rounded percentage display.
-- [ ] 5.8 Delete successful temporary tasks, enqueue delete-only cleanup when deletion itself fails, persist redacted pre/post audit data, and emit one deduplicated terminal notification.
-- [ ] 5.9 Add concurrency and crash-injection tests at every boundary before and after lock persistence, request transmission, turn acceptance, verification, and cleanup to prove at most one actual generation per scoped window.
-- [ ] 5.10 Add model-selection tests for new lightweight versions, missing lightweight families, default fallback, multiple/absent defaults, explicit pre-generation rejection, and ambiguous failure without retry.
+- [x] 5.1 Implement an updateable lightweight-model family policy that selects the newest recognized available lightweight model from `model/list` and otherwise selects the current `isDefault = true` model.
+- [x] 5.2 Implement activation eligibility for enabled automation, a fresh exact `usedPercent = 0` five-hour bucket, no already-active verified timer, and no active scoped suppression lock, without applying a weekly threshold.
+- [x] 5.3 Implement two consecutive authoritative confirmations, transactional lock acquisition, and the final read-only preflight that cancels activation when external Codex activity has already started the window, without claiming source attribution.
+- [x] 5.4 Construct a fresh isolated temporary thread in an empty read-only working directory with non-interactive approvals, lowest supported reasoning, no client-supplied dynamic tools, and a constant minimal fixed-response request.
+- [x] 5.5 Implement model fallback only for an explicit pre-generation model-unavailable rejection; refresh the catalog under the same lock and permanently close fallback once a turn may have started.
+- [x] 5.6 Implement turn lifecycle handling, accepted-generation boundary auditing, timeout interruption, unexpected-tool interruption, and the no-retry rule for failed or ambiguous outcomes.
+- [x] 5.7 Verify activation through a changed fresh future five-hour `resetsAt` within a 60-second read-only observation period, independent of rounded percentage display.
+- [x] 5.8 Delete successful temporary tasks, enqueue delete-only cleanup when deletion itself fails, persist redacted pre/post audit data, and emit one deduplicated terminal notification.
+- [x] 5.9 Add concurrency and crash-injection tests at every boundary before and after lock persistence, request transmission, turn acceptance, verification, and cleanup to prove at most one actual generation per scoped window.
+- [x] 5.10 Add model-selection tests for new lightweight versions, missing lightweight families, default fallback, multiple/absent defaults, explicit pre-generation rejection, and ambiguous failure without retry.
 
 ## 6. Floating Widget and Tray Experience
 
