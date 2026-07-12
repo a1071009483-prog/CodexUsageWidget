@@ -243,17 +243,24 @@ WHERE attempt_id = @attempt_id;
     }
 
     /// <summary>
-    /// Sets <c>PRAGMA synchronous = FULL</c> so that every commit is durably
-    /// flushed to disk before the transaction is reported as committed. This is
-    /// the core of the at-most-once guarantee: a crash after commit must not
-    /// lose the lock record.
+    /// Sets durability and contention pragmas so every commit is durably flushed to disk
+    /// before the transaction is reported as committed, and a concurrent writer waits
+    /// briefly for the lock instead of failing immediately. <c>PRAGMA synchronous = FULL</c>
+    /// is the core of the at-most-once guarantee: a crash after commit must not lose the
+    /// lock record. <c>PRAGMA busy_timeout</c> lets a second concurrent <c>TryAcquireAsync</c>
+    /// for the same scoped key wait for the first to commit, then observe the UNIQUE block
+    /// (returning the existing attempt) rather than throwing a transient
+    /// <c>SQLITE_BUSY</c>.
     /// </summary>
     private static async Task SetSynchronousFullAsync(
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "PRAGMA synchronous = FULL;";
+        command.CommandText = """
+PRAGMA synchronous = FULL;
+PRAGMA busy_timeout = 5000;
+""";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 

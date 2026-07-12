@@ -236,4 +236,38 @@ public sealed class ActivationLockStoreTests : IDisposable
             () => store.TryAcquireAsync(badAttempt, CancellationToken.None));
         Assert.NotNull(thrown);
     }
+
+    [Fact]
+    public async Task PrimaryKeyCollisionIsFailSafeAndDoesNotAcquire()
+    {
+        // A collision on the attempt_id PRIMARY KEY (a caller bug: reusing an attempt id
+        // for a different scoped key) is reported by SQLite/Microsoft.Data.Sqlite as a
+        // UNIQUE-style constraint on the implicit primary-key index. The store treats it
+        // as a deduplication block (Acquired=false) rather than throwing or — critically —
+        // returning Acquired=true. This is the fail-safe direction: no generation can
+        // result from a primary-key collision. (In practice attempt ids are unique GUIDs,
+        // so this path is unreachable; the test pins the fail-safe behavior.)
+        ActivationLockStore store = CreateStore();
+
+        ActivationAttempt first = NewAttempt(
+            attemptId: "att-shared",
+            namespaceHash: "ns-hash-a",
+            workspaceScope: "global",
+            windowKey: "win-a");
+        Assert.True((await store.TryAcquireAsync(first, CancellationToken.None)).Acquired);
+
+        // Same attempt_id (PRIMARY KEY collision) but a DIFFERENT scoped key.
+        ActivationAttempt second = NewAttempt(
+            attemptId: "att-shared",
+            namespaceHash: "ns-hash-b",
+            workspaceScope: "team",
+            windowKey: "win-b");
+
+        Exception? thrown = await Record.ExceptionAsync(
+            () => store.TryAcquireAsync(second, CancellationToken.None));
+        Assert.Null(thrown); // fail-safe: no exception escapes.
+
+        AcquisitionResult result = await store.TryAcquireAsync(second, CancellationToken.None);
+        Assert.False(result.Acquired); // and it never claims acquisition.
+    }
 }
