@@ -62,8 +62,11 @@
 - [x] 7.1 Add automated sensitive-data scans proving logs, SQLite rows, settings, crash reports, and audit exports contain no tokens, cookies, raw credentials, prompt bodies, response bodies, or unredacted workspace content.
 - [x] 7.2 Build fake-server end-to-end scenarios covering every spec requirement, including external Codex usage, account switching, sleep/resume, network loss, App Server restarts, stale cached 100%, cleanup failure, and the narrow external-use race.
 - [x] 7.3 Publish and package a Windows self-contained build with documented Codex CLI prerequisites, per-user install/uninstall behavior, and no administrator requirement for normal use.
-- [ ] 7.4 Verify install, first run, Windows sign-in startup, pause/resume, upgrade with database migration, rollback, uninstall, and optional local-data removal after any active suppression period.
+- [ ] 7.4 Verify install, first run, Windows sign-in startup, pause/resume, upgrade with database migration, rollback, uninstall, and optional local-data removal after any active suppression period.  
+  See `docs/acceptance-matrix.md` for the manual checklist and `scripts/upgrade.ps1` / `scripts/rollback.ps1`.
 - [x] 7.5 Implement a read-only authenticated smoke test harness that confirms real five-hour/weekly mapping, startup freshness, 60-second reconciliation, countdown behavior, and zero model turns. (Execution requires Windows + authenticated Codex CLI.)
-- [ ] 7.6 With explicit user approval and a fully unused five-hour window, run exactly one real activation test and verify a future `resetsAt`, temporary-task cleanup, redacted audit data, and zero later `turn/start` calls in that guarded period.
-- [ ] 7.7 Execute the full automated suite and manually check the final acceptance matrix: real-time values, one-second notification display, 60-second maximum reconciliation, 120-second stale state, at-most-once activation, crash recovery, model fallback, and no post-success generation.
+- [ ] 7.6 With explicit user approval and a fully unused five-hour window, run exactly one real activation test and verify a future `resetsAt`, temporary-task cleanup, redacted audit data, and zero later `turn/start` calls in that guarded period.  
+  See `tests/CodexUsageWidget.AcceptanceTests/Activation/RealActivationAcceptanceTest.cs` and `docs/acceptance-matrix.md`.
+- [ ] 7.7 Execute the full automated suite and manually check the final acceptance matrix: real-time values, one-second notification display, 60-second maximum reconciliation, 120-second stale state, at-most-once activation, crash recovery, model fallback, and no post-success generation.  
+  See `docs/acceptance-matrix.md`.
 - [x] 7.8 Write user documentation for installation, authentication, quota semantics, model fallback, startup behavior, pause/reconnect/audit controls, known race limitations, troubleshooting, and safe removal.
