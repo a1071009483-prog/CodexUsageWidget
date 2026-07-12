@@ -116,10 +116,10 @@ public sealed class AppServerModelBoundaryTests
         await delete;
     }
 
-    private static async Task<JsonElement> ReadRequestAsync(ChannelLineWriter input) =
+    private static async Task<JsonElement> ReadRequestAsync(ChannelLineWriter input) =>
         JsonDocument.Parse(await input.ReadLineAsync(CancellationToken.None)).RootElement.Clone();
 
-    private static void Respond(AsyncLineTransport transport, JsonElement request, string resultJson) =
+    private static void Respond(AsyncLineTransport transport, JsonElement request, string resultJson) =>
         transport.ServerOutput.WriteLine(JsonSerializer.Serialize(new
         {
             id = request.GetProperty("id").GetInt64(),
@@ -130,7 +130,7 @@ public sealed class AppServerModelBoundaryTests
         AsyncLineTransport transport,
         JsonElement request,
         long code,
-        string message) =
+        string message) =>
         transport.ServerOutput.WriteLine(JsonSerializer.Serialize(new
         {
             id = request.GetProperty("id").GetInt64(),

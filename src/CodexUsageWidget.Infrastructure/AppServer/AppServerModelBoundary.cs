@@ -97,13 +97,13 @@ public sealed class AppServerModelBoundary : IModelBoundary
     public Task InterruptTurnAsync(
         string threadId,
         string turnId,
-        CancellationToken cancellationToken) =
+        CancellationToken cancellationToken) =>
         _gateway.InterruptTurnAsync(threadId, turnId, cancellationToken);
 
     /// <inheritdoc />
     public Task DeleteThreadAsync(
         string threadId,
-        CancellationToken cancellationToken) =
+        CancellationToken cancellationToken) =>
         _gateway.DeleteThreadAsync(threadId, cancellationToken);
 
     private static string MapProtocolFailure(AppServerProtocolException exception)
@@ -117,7 +117,7 @@ public sealed class AppServerModelBoundary : IModelBoundary
             : $"protocol-{exception.Kind}";
     }
 
-    private static string RedactErrorCategory(Exception exception) =
+    private static string RedactErrorCategory(Exception exception) =>
         exception switch
         {
             OperationCanceledException => "cancelled",

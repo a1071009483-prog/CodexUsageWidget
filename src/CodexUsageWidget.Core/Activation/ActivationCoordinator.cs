@@ -71,7 +71,6 @@ public sealed class ActivationCoordinator
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        Console.WriteLine("[Coordinator] TryActivateAsync entered");
 
         if (!_options.IsAutomationEnabled || !request.IsAutomationEnabled)
         {
@@ -101,9 +100,7 @@ public sealed class ActivationCoordinator
             // Second confirmation after debounce.
             if (_options.ConfirmationDebounce > TimeSpan.Zero)
             {
-                Console.WriteLine($"[Coordinator] awaiting debounce delay {_options.ConfirmationDebounce}");
                 await _delay.DelayAsync(_options.ConfirmationDebounce, cancellationToken).ConfigureAwait(false);
-                Console.WriteLine("[Coordinator] debounce delay completed");
             }
 
             QuotaSnapshot? confirmed = await FetchSnapshotAsync(cancellationToken).ConfigureAwait(false);

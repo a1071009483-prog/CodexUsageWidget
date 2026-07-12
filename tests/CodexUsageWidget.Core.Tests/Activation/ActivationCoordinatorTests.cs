@@ -114,12 +114,14 @@ public sealed class ActivationCoordinatorTests : IDisposable
     {
         _quotaSource.EnqueueSuccess(Raw(5, null));
 
-        ActivationResult result = await _coordinator.TryActivateAsync(
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
             Identity(),
             Snapshot(0, true, true, null),
             new ActivationRequest(true));
 
         await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
 
         Assert.Equal(ActivationOutcome.NotEligible, result.Outcome);
         Assert.Empty(_modelBoundary.StartCalls);
@@ -128,15 +130,19 @@ public sealed class ActivationCoordinatorTests : IDisposable
     [Fact]
     public async Task ActiveSuppressionLockReturnsSuppressed()
     {
-        EnqueueConfirmationSnapshots(Raw(0, null));
+        EnqueueConfirmationSnapshots(
+            Raw(0, null),
+            Raw(0, null));
         await SeedActiveLockAsync(Now.AddHours(1));
 
-        ActivationResult result = await _coordinator.TryActivateAsync(
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
             Identity(),
             Snapshot(0, true, true, null),
             new ActivationRequest(true));
 
         await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
 
         Assert.Equal(ActivationOutcome.Suppressed, result.Outcome);
         Assert.Empty(_modelBoundary.StartCalls);
@@ -145,15 +151,19 @@ public sealed class ActivationCoordinatorTests : IDisposable
     [Fact]
     public async Task LockConflictReturnsSuppressed()
     {
-        EnqueueConfirmationSnapshots(Raw(0, null));
+        EnqueueConfirmationSnapshots(
+            Raw(0, null),
+            Raw(0, null));
         await SeedActiveLockAsync(Now.AddHours(5));
 
-        ActivationResult result = await _coordinator.TryActivateAsync(
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
             Identity(),
             Snapshot(0, true, true, null),
             new ActivationRequest(true));
 
         await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
 
         Assert.Equal(ActivationOutcome.Suppressed, result.Outcome);
         Assert.Empty(_modelBoundary.StartCalls);
@@ -165,12 +175,14 @@ public sealed class ActivationCoordinatorTests : IDisposable
         EnqueueConfirmationSnapshots(Raw(0, null));
         _quotaSource.EnqueueSuccess(Raw(7, null));
 
-        ActivationResult result = await _coordinator.TryActivateAsync(
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
             Identity(),
             Snapshot(0, true, true, null),
             new ActivationRequest(true));
 
         await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
 
         Assert.Equal(ActivationOutcome.ExternallySatisfied, result.Outcome);
         Assert.Empty(_modelBoundary.StartCalls);
@@ -184,12 +196,14 @@ public sealed class ActivationCoordinatorTests : IDisposable
         EnqueueConfirmationSnapshots(Raw(0, null));
         _modelCatalog.Models = Array.Empty<ModelCandidate>();
 
-        ActivationResult result = await _coordinator.TryActivateAsync(
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
             Identity(),
             Snapshot(0, true, true, null),
             new ActivationRequest(true));
 
         await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
 
         Assert.Equal(ActivationOutcome.NoModel, result.Outcome);
         Assert.Empty(_modelBoundary.StartCalls);
@@ -300,10 +314,14 @@ public sealed class ActivationCoordinatorTests : IDisposable
         EnqueueConfirmationSnapshots(Raw(0, null));
         _lockStore.ExceptionToThrow = new InvalidOperationException("store down");
 
-        ActivationResult result = await _coordinator.TryActivateAsync(
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
             Identity(),
             Snapshot(0, true, true, null),
             new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
 
         Assert.Equal(ActivationOutcome.Failed, result.Outcome);
         Assert.Empty(_modelBoundary.StartCalls);
@@ -395,9 +413,8 @@ public sealed class ActivationCoordinatorTests : IDisposable
         new("user@example.com");
 
     private static string LocalWindowKey() =>
-        new DateTimeOffset(
-            (Now.ToUnixTimeSeconds() / (5 * 3600)) * (5 * 3600),
-            TimeSpan.Zero).ToString("O");
+        DateTimeOffset.FromUnixTimeSeconds(
+            (Now.ToUnixTimeSeconds() / (5 * 3600)) * (5 * 3600)).ToString("O");
 
     private static QuotaSnapshot Snapshot(
         int used,
