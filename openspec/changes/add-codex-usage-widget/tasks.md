@@ -16,12 +16,12 @@
 
 ## 3. Durable Safety State and Process Coordination
 
-- [ ] 3.1 Create the SQLite schema and migration runner for settings, hashed account namespaces, activation attempts, notifications, cleanup work, and redacted audit rows under `%LOCALAPPDATA%\CodexUsageWidget`.
-- [ ] 3.2 Implement stable account/workspace namespace hashing with a locally protected salt and verify that raw account identifiers are never persisted.
-- [ ] 3.3 Implement an atomic unique write-ahead activation lock with authoritative-or-local window epochs, suppression deadline, pre/post quota fields, turn-boundary state, model selection, and terminal outcome.
-- [ ] 3.4 Load and validate safety state before activation starts; fail closed on corruption, migration failure, inconsistent rows, or failed durable writes.
-- [ ] 3.5 Implement redacted audit recording and deferred temporary-thread cleanup without any path back into model generation.
-- [ ] 3.6 Enforce one application instance per Windows user with a named mutex and bring the existing widget forward through a local single-instance signal.
+- [x] 3.1 Create the SQLite schema and migration runner for settings, hashed account namespaces, activation attempts, notifications, cleanup work, and redacted audit rows under `%LOCALAPPDATA%\CodexUsageWidget`.
+- [x] 3.2 Implement stable account/workspace namespace hashing with a locally protected salt and verify that raw account identifiers are never persisted.
+- [x] 3.3 Implement an atomic unique write-ahead activation lock with authoritative-or-local window epochs, suppression deadline, pre/post quota fields, turn-boundary state, model selection, and terminal outcome.
+- [x] 3.4 Load and validate safety state before activation starts; fail closed on corruption, migration failure, inconsistent rows, or failed durable writes.
+- [x] 3.5 Implement redacted audit recording and deferred temporary-thread cleanup without any path back into model generation.
+- [x] 3.6 Enforce one application instance per Windows user with a named mutex and bring the existing widget forward through a local single-instance signal.
 
 ## 4. Real-Time Usage Monitoring
 
