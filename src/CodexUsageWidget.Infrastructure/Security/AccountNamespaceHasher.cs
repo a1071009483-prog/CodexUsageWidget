@@ -11,6 +11,13 @@ namespace CodexUsageWidget.Infrastructure.Security;
 /// a base64url encoding. The hashing pipeline is platform-agnostic; only the salt
 /// protection layer (<see cref="IProtectedData"/>) depends on the platform.
 /// </summary>
+/// <remarks>
+/// Thread-safety: the salt is loaded exactly once via a <see cref="Lazy{T}"/> with
+/// <see cref="LazyThreadSafetyMode.ExecutionAndPublication"/> so concurrent
+/// <see cref="GetNamespaceHashAsync"/> calls never race to generate different salts.
+/// Once loaded, the salt is cached for the instance lifetime; a corrupt salt store faults
+/// the cached task and re-throws on every subsequent call (fail closed, no retry).
+/// </remarks>
 public sealed class AccountNamespaceHasher : IAccountNamespaceHasher
 {
     /// <summary>
@@ -18,13 +25,16 @@ public sealed class AccountNamespaceHasher : IAccountNamespaceHasher
     /// </summary>
     public const string GlobalWorkspaceScope = "global";
 
-    private readonly ProtectedSaltStore _saltStore;
-    private byte[]? _cachedSalt;
+    private readonly ISaltStore _saltStore;
+    private readonly Lazy<Task<byte[]>> _saltTask;
 
-    public AccountNamespaceHasher(ProtectedSaltStore saltStore)
+    public AccountNamespaceHasher(ISaltStore saltStore)
     {
         ArgumentNullException.ThrowIfNull(saltStore);
         _saltStore = saltStore;
+        _saltTask = new Lazy<Task<byte[]>>(
+            () => _saltStore.GetOrCreateSaltAsync(CancellationToken.None),
+            LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     /// <inheritdoc />
@@ -33,11 +43,16 @@ public sealed class AccountNamespaceHasher : IAccountNamespaceHasher
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(identity);
+        cancellationToken.ThrowIfCancellationRequested();
 
-        _cachedSalt ??= await _saltStore.GetOrCreateSaltAsync(cancellationToken)
-            .ConfigureAwait(false);
+        // The salt load is one-time and uses CancellationToken.None (it is a fast file
+        // read + DPAPI unprotect). Re-check the caller's token after the await so a
+        // cancellation observed during load is honored before the (fast, synchronous)
+        // hash computation.
+        byte[] salt = await _saltTask.Value.ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
 
-        return ComputeHash(_cachedSalt, identity);
+        return ComputeHash(salt, identity);
     }
 
     /// <summary>

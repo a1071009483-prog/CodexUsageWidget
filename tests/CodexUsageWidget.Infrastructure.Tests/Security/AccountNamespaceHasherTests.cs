@@ -8,9 +8,10 @@ using Xunit;
 
 namespace CodexUsageWidget.Infrastructure.Tests.Security;
 
-public sealed class AccountNamespaceHasherTests
+public sealed class AccountNamespaceHasherTests : IDisposable
 {
     private static readonly byte[] FixedSalt = RandomNumberGenerator.GetBytes(32);
+    private readonly List<string> _tempDirs = new();
 
     [Fact]
     public async Task SameIdentityProducesSameHashAcrossCalls()
@@ -133,14 +134,14 @@ public sealed class AccountNamespaceHasherTests
         string firstHash = await hasherA.GetNamespaceHashAsync(
             new AccountIdentity("dave@example.com", "plus", "global"), CancellationToken.None);
 
-        int protectCallsAfterFirst = spy.ProtectCallCount;
-
-        var hasherB = new AccountNamespaceHasher(new ProtectedSaltStore(dir, new CountingProtectedData()));
+        // Reuse the SAME spy so hasherB's load of the existing salt observes Unprotect
+        // (not Protect), proving the persisted salt was reused rather than regenerated.
+        var hasherB = new AccountNamespaceHasher(new ProtectedSaltStore(dir, spy));
         string secondHash = await hasherB.GetNamespaceHashAsync(
             new AccountIdentity("dave@example.com", "plus", "global"), CancellationToken.None);
 
         Assert.Equal(firstHash, secondHash);
-        Assert.Equal(1, protectCallsAfterFirst);
+        Assert.Equal(1, spy.ProtectCallCount);
     }
 
     [Fact]
@@ -206,8 +207,32 @@ public sealed class AccountNamespaceHasherTests
         Assert.DoesNotContain("frank", saltText, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string TempDir() =>
-        Path.Combine(Path.GetTempPath(), "codex-ns-test-" + Guid.NewGuid().ToString("N"));
+    private string TempDir()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "codex-ns-test-" + Guid.NewGuid().ToString("N"));
+        _tempDirs.Add(dir);
+        return dir;
+    }
+
+    public void Dispose()
+    {
+        // Release pooled SQLite file handles before deleting the temp directories.
+        SqliteConnection.ClearAllPools();
+        foreach (string dir in _tempDirs)
+        {
+            if (Directory.Exists(dir))
+            {
+                try
+                {
+                    Directory.Delete(dir, recursive: true);
+                }
+                catch (IOException)
+                {
+                    // Best-effort cleanup; do not fail the test run for a lingering temp dir.
+                }
+            }
+        }
+    }
 
     private static async Task InsertNamespaceRowAsync(
         SqliteConnection connection, string hash, string? plan, CancellationToken ct)
