@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Runtime.Versioning;
 using System.Text;
 using CodexUsageWidget.Infrastructure.Windows;
 using Xunit;
@@ -14,6 +15,7 @@ namespace CodexUsageWidget.Infrastructure.Tests.Windows;
 /// process), but the first instance's mutex is always released synchronously on
 /// the thread that acquired it to satisfy Windows mutex ownership rules.
 /// </summary>
+[SupportedOSPlatform("windows")]
 public sealed class SingleInstanceCoordinatorTests
 {
     private static string UniqueName() =>
@@ -114,6 +116,94 @@ public sealed class SingleInstanceCoordinatorTests
         finally
         {
             coordinator.ReleaseInstance();
+        }
+    }
+
+    [Fact]
+    public void SecondInstanceSignalsFirstInstanceViaPublicApi()
+    {
+        string name = UniqueName();
+        SingleInstanceCoordinator first = new(name);
+        Assert.True(first.TryAcquireInstance());
+
+        TaskCompletionSource tcs = new();
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        first.StartListening(
+            (CancellationToken ct) =>
+            {
+                tcs.TrySetResult();
+                return Task.CompletedTask;
+            },
+            cts.Token);
+
+        try
+        {
+            bool signaled = Task.Run(() =>
+            {
+                SingleInstanceCoordinator second = new(name);
+                if (second.TryAcquireInstance())
+                {
+                    return false;
+                }
+
+                second.SignalExistingInstanceAsync(CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                return true;
+            }).GetAwaiter().GetResult();
+
+            Assert.True(signaled);
+            Assert.True(tcs.Task.Wait(TimeSpan.FromSeconds(5)));
+            Assert.True(tcs.Task.IsCompletedSuccessfully);
+        }
+        finally
+        {
+            first.ReleaseInstance();
+        }
+    }
+
+    [Fact]
+    public void ListenerSurvivesCallbackExceptionAndAcceptsNextSignal()
+    {
+        string name = UniqueName();
+        SingleInstanceCoordinator first = new(name);
+        Assert.True(first.TryAcquireInstance());
+
+        int callCount = 0;
+        TaskCompletionSource secondSignal = new();
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        first.StartListening(
+            (CancellationToken ct) =>
+            {
+                int current = Interlocked.Increment(ref callCount);
+                if (current == 1)
+                {
+                    throw new InvalidOperationException("boom");
+                }
+
+                secondSignal.TrySetResult();
+                return Task.CompletedTask;
+            },
+            cts.Token);
+
+        try
+        {
+            Task.Run(() =>
+            {
+                SingleInstanceCoordinator second = new(name);
+                second.SignalExistingInstanceAsync(CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                Thread.Sleep(200);
+                second.SignalExistingInstanceAsync(CancellationToken.None)
+                    .GetAwaiter().GetResult();
+            }).GetAwaiter().GetResult();
+
+            Assert.True(secondSignal.Task.Wait(TimeSpan.FromSeconds(5)));
+            Assert.True(secondSignal.Task.IsCompletedSuccessfully);
+            Assert.True(callCount >= 2);
+        }
+        finally
+        {
+            first.ReleaseInstance();
         }
     }
 

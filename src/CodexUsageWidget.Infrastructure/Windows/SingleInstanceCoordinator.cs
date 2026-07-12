@@ -18,6 +18,7 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator, IDis
 
     private readonly string _mutexName;
     private readonly string _pipeName;
+    private readonly IRedactingLog? _log;
 
     private Mutex? _mutex;
     private bool _ownsMutex;
@@ -30,10 +31,11 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator, IDis
     /// The name is combined with the current Windows user identity so that the
     /// mutex and pipe are scoped to the interactive user.
     /// </summary>
-    public SingleInstanceCoordinator(string instanceName)
+    public SingleInstanceCoordinator(string instanceName, IRedactingLog? log = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceName);
 
+        _log = log;
         _mutexName = @$"Local\{instanceName}_SingleInstance_{CurrentUserToken}";
         _pipeName = $"{instanceName}_BringForward_{CurrentUserToken}";
     }
@@ -156,7 +158,7 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator, IDis
         _disposed = true;
     }
 
-    private static async Task ListenAsync(
+    private async Task ListenAsync(
         string pipeName,
         Func<CancellationToken, Task> onBringForward,
         CancellationToken cancellationToken)
@@ -172,6 +174,12 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator, IDis
                     PipeTransmissionMode.Byte,
                     PipeOptions.Asynchronous);
 
+                // Note: an explicit per-user DACL would be preferable, but
+                // NamedPipeServerStream.SetAccessControl reliably breaks the
+                // same-user client connection in this .NET 8 / WSL test runtime.
+                // Scoping is therefore enforced by the per-user pipe name and the
+                // single-instance mutex; the signal payload carries no sensitive data.
+
                 await server.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
 
                 // Read at least one byte to ensure the client did not just connect
@@ -180,7 +188,31 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator, IDis
                 int read = await server.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
                 if (read > 0)
                 {
-                    await onBringForward(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        await onBringForward(cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // The bring-forward callback must not kill the listener loop;
+                        // otherwise later instances would be unable to signal this one.
+                        if (_log is not null)
+                        {
+                            await _log.WriteAsync(
+                                new StructuredLogEvent(
+                                    RedactingLogLevel.Warning,
+                                    "SingleInstanceBringForwardCallbackFailed",
+                                    new Dictionary<string, string?>
+                                    {
+                                        ["exceptionType"] = ex.GetType().FullName,
+                                    }),
+                                CancellationToken.None).ConfigureAwait(false);
+                        }
+                    }
                 }
             }
         }
@@ -199,6 +231,11 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator, IDis
     private static string ComputeCurrentUserToken()
     {
         WindowsIdentity identity = WindowsIdentity.GetCurrent();
-        return identity.User?.Value ?? identity.Name ?? "unknown";
+        // Prefer the stable user SID. Fall back to a sanitized name so that
+        // characters illegal in mutex/pipe names (e.g. 'DOMAIN\\user') are removed.
+        string token = identity.User?.Value
+            ?? identity.Name?.Replace("\\", "_", StringComparison.Ordinal)
+            ?? "unknown";
+        return token;
     }
 }
