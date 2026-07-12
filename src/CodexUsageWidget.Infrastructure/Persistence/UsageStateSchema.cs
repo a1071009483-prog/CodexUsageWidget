@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE TABLE IF NOT EXISTS cleanup_work (
     cleanup_id TEXT PRIMARY KEY,
     attempt_id TEXT NOT NULL,
-    thread_id TEXT,
+    thread_id TEXT NOT NULL,
     enqueued_at TEXT NOT NULL,
     state TEXT NOT NULL
 );

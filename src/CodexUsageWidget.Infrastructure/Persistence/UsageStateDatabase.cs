@@ -54,6 +54,8 @@ public sealed class UsageStateDatabase
         {
             await _migrator.MigrateAsync(connection, cancellationToken)
                 .ConfigureAwait(false);
+            await SetPragmasAsync(connection, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch
         {
@@ -62,5 +64,17 @@ public sealed class UsageStateDatabase
         }
 
         return connection;
+    }
+
+    private static async Task SetPragmasAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+PRAGMA synchronous = FULL;
+PRAGMA busy_timeout = 5000;
+""";
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 }

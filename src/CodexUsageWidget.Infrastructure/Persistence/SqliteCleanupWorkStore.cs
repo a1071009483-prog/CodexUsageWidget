@@ -8,6 +8,11 @@ namespace CodexUsageWidget.Infrastructure.Persistence;
 /// SQLite-backed durable queue for deferred delete-only cleanup work. A typical
 /// item is the deletion of a temporary activation thread. Cleanup failures are
 /// retried later; the queue never leads back to model generation.
+///
+/// Items remain in the <c>pending</c> state until explicitly marked completed.
+/// A crash between <see cref="TryTakePendingAsync"/> and
+/// <see cref="MarkCompletedAsync"/> therefore leaves the item eligible for
+/// retry on the next pass, with no stuck <c>processing</c> state.
 /// </summary>
 public sealed class SqliteCleanupWorkStore : ICleanupWorkStore
 {
@@ -31,7 +36,6 @@ public sealed class SqliteCleanupWorkStore : ICleanupWorkStore
 
         await using SqliteConnection connection = await _database
             .CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await SetSynchronousFullAsync(connection, cancellationToken).ConfigureAwait(false);
 
         await using DbTransactionWrapper transaction = new(
             (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false));
@@ -67,19 +71,14 @@ ON CONFLICT(cleanup_id) DO NOTHING;
 
         await using SqliteConnection connection = await _database
             .CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await SetSynchronousFullAsync(connection, cancellationToken).ConfigureAwait(false);
 
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-UPDATE cleanup_work
-SET state = 'processing'
-WHERE cleanup_id = (
-    SELECT cleanup_id FROM cleanup_work
-    WHERE state = 'pending'
-    ORDER BY enqueued_at ASC
-    LIMIT 1
-)
-RETURNING cleanup_id, attempt_id, thread_id, enqueued_at, state;
+SELECT cleanup_id, attempt_id, thread_id, enqueued_at, state
+FROM cleanup_work
+WHERE state = 'pending'
+ORDER BY enqueued_at ASC
+LIMIT 1;
 """;
 
         await using SqliteDataReader reader = await command
@@ -100,7 +99,6 @@ RETURNING cleanup_id, attempt_id, thread_id, enqueued_at, state;
 
         await using SqliteConnection connection = await _database
             .CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await SetSynchronousFullAsync(connection, cancellationToken).ConfigureAwait(false);
 
         await using DbTransactionWrapper transaction = new(
             (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false));
@@ -109,7 +107,7 @@ RETURNING cleanup_id, attempt_id, thread_id, enqueued_at, state;
             await using SqliteCommand command = connection.CreateCommand();
             command.Transaction = transaction.Transaction;
             command.CommandText =
-                "UPDATE cleanup_work SET state = 'completed' WHERE cleanup_id = @cleanup_id;";
+                "UPDATE cleanup_work SET state = 'completed' WHERE cleanup_id = @cleanup_id AND state = 'pending';";
             command.Parameters.Add("@cleanup_id", SqliteType.Text).Value = cleanupId;
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -122,34 +120,14 @@ RETURNING cleanup_id, attempt_id, thread_id, enqueued_at, state;
     }
 
     /// <inheritdoc/>
-    public async Task MarkFailedAsync(string cleanupId, CancellationToken cancellationToken)
+    public Task MarkFailedAsync(string cleanupId, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(cleanupId);
         cancellationToken.ThrowIfCancellationRequested();
 
-        await using SqliteConnection connection = await _database
-            .CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await SetSynchronousFullAsync(connection, cancellationToken).ConfigureAwait(false);
-
-        await using DbTransactionWrapper transaction = new(
-            (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false));
-        try
-        {
-            await using SqliteCommand command = connection.CreateCommand();
-            command.Transaction = transaction.Transaction;
-            // The item was atomically moved to 'processing' by TryTakePendingAsync.
-            // MarkFailed returns it to 'pending' so the next cleanup pass retries it.
-            command.CommandText =
-                "UPDATE cleanup_work SET state = 'pending' WHERE cleanup_id = @cleanup_id;";
-            command.Parameters.Add("@cleanup_id", SqliteType.Text).Value = cleanupId;
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
+        // Items remain in 'pending' after a failed cleanup attempt so they can be
+        // retried later. No state change is required.
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc/>
@@ -187,9 +165,6 @@ ORDER BY enqueued_at ASC;
         state.ToUpperInvariant() switch
         {
             "COMPLETED" => CleanupWorkState.Completed,
-            "FAILED" => CleanupWorkState.Failed,
-            // 'processing' is an internal transient state; consumers see it as pending
-            // so that MarkFailed can return it to the pending queue for retry.
             _ => CleanupWorkState.Pending,
         };
 
@@ -200,15 +175,6 @@ ORDER BY enqueued_at ASC;
         byte[] bytes = System.Text.Encoding.UTF8.GetBytes($"{attemptId}\n{threadId}");
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))
             .ToLowerInvariant();
-    }
-
-    private static async Task SetSynchronousFullAsync(
-        SqliteConnection connection,
-        CancellationToken cancellationToken)
-    {
-        await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "PRAGMA synchronous = FULL;";
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -15,11 +15,6 @@ public enum CleanupWorkState
     /// The cleanup item completed successfully.
     /// </summary>
     Completed,
-
-    /// <summary>
-    /// The cleanup item failed and will remain available for later retry.
-    /// </summary>
-    Failed,
 }
 
 /// <summary>
@@ -58,10 +53,10 @@ public interface ICleanupWorkStore
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Atomically retrieves the oldest pending cleanup item and marks it as
-    /// being processed, or returns <c>null</c> when no pending items exist.
-    /// Implementations may leave the item in a pending state and rely on
-    /// <see cref="MarkFailedAsync"/> to make it available again.
+    /// Atomically retrieves the oldest pending cleanup item, or returns <c>null</c>
+    /// when no pending items exist. The item remains in a pending state so that a
+    /// crash between this call and <see cref="MarkCompletedAsync"/> leaves it
+    /// eligible for retry.
     /// </summary>
     Task<CleanupWorkItem?> TryTakePendingAsync(CancellationToken cancellationToken);
 
@@ -72,7 +67,9 @@ public interface ICleanupWorkStore
     Task MarkCompletedAsync(string cleanupId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Marks the cleanup item as failed so it remains eligible for retry.
+    /// No-op placeholder: items remain pending after a failed cleanup attempt so
+    /// they can be retried later. Calling this method does not change the store
+    /// state.
     /// </summary>
     Task MarkFailedAsync(string cleanupId, CancellationToken cancellationToken);
 
