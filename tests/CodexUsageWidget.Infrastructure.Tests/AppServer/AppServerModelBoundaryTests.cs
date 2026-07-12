@@ -116,6 +116,33 @@ public sealed class AppServerModelBoundaryTests
         await delete;
     }
 
+    [Fact]
+    public async Task StartGenerationPropagatesCallerCancellation()
+    {
+        AsyncLineTransport transport = new();
+        await using JsonRpcConnection connection = new(
+            transport.ServerOutput,
+            transport.ClientInput);
+        await connection.StartAsync(CancellationToken.None);
+
+        AppServerModelBoundary boundary = new(new CodexAppServerGateway(connection));
+        ModelGenerationRequest request = new(
+            AttemptId: "attempt-cancel",
+            ModelId: "gpt-4o-mini",
+            Prompt: "OK",
+            WorkingDirectory: string.Empty,
+            Timeout: TimeSpan.FromSeconds(10));
+
+        using var cancellationTokenSource = new CancellationTokenSource();
+        cancellationTokenSource.Cancel();
+
+        Task<ModelGenerationResult> generation = boundary.StartGenerationAsync(
+            request,
+            cancellationTokenSource.Token);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => generation);
+    }
+
     private static async Task<JsonElement> ReadRequestAsync(ChannelLineWriter input) =>
         JsonDocument.Parse(await input.ReadLineAsync(CancellationToken.None)).RootElement.Clone();
 

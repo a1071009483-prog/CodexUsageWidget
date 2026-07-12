@@ -248,21 +248,35 @@ public partial class App : System.Windows.Application
             IActivationLockStore lockStore = new ActivationLockStore(database);
             ICleanupWorkStore cleanupStore = new SqliteCleanupWorkStore(database);
 
+            ClientInformation clientInformation = new(
+                "codex-usage-widget",
+                "1.0.0",
+                "Codex Usage Widget");
             ProcessStartRequest startRequest = new(
                 resolution.Command!,
                 ["app-server"],
                 appServerWorkingDirectory);
 
+            Func<CancellationToken, Task<AppServerCapabilityResult>> capabilityPreflight =
+                AppServerCapabilityPreflight.ForProcess(
+                    new SystemProcessHost(),
+                    startRequest,
+                    clientInformation,
+                    TimeSpan.FromSeconds(5),
+                    delay,
+                    new NullRedactingLog());
+
             _appServerSupervisor = new AppServerSupervisor(
                 new SystemProcessHost(),
                 startRequest,
-                new ClientInformation("codex-usage-widget", "1.0.0", "Codex Usage Widget"),
+                clientInformation,
                 TimeSpan.FromSeconds(5),
                 delay,
                 AppServerSupervisorSettings.Default,
                 healthyDelay: delay,
                 graceDelay: delay,
-                log: new NullRedactingLog());
+                log: new NullRedactingLog(),
+                capabilityPreflight: capabilityPreflight);
 
             _appServerQuotaSource = new AppServerQuotaSource(_appServerSupervisor);
             IModelCatalog modelCatalog = new AppServerModelCatalog(_appServerSupervisor);
@@ -288,7 +302,12 @@ public partial class App : System.Windows.Application
             using var startupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var readyTcs = new TaskCompletionSource();
             EventHandler<AppServerSupervisorEventArgs> onReady = (_, _) => readyTcs.TrySetResult();
+            EventHandler<AppServerIncompatibleEventArgs> onIncompatible = (_, args) =>
+                readyTcs.TrySetException(
+                    new InvalidOperationException(
+                        $"The Codex App Server is missing required methods: {string.Join(", ", args.MissingMethods)}."));
             _appServerSupervisor.SessionPublished += onReady;
+            _appServerSupervisor.IncompatibleDetected += onIncompatible;
             try
             {
                 _ = _appServerSupervisor.StartAsync(startupCts.Token);
@@ -297,6 +316,7 @@ public partial class App : System.Windows.Application
             finally
             {
                 _appServerSupervisor.SessionPublished -= onReady;
+                _appServerSupervisor.IncompatibleDetected -= onIncompatible;
             }
 
             return (_appServerQuotaSource, coordinator);

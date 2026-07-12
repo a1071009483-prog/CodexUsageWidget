@@ -70,6 +70,11 @@ public sealed class AppServerModelBoundary : IModelBoundary
                 ThreadId: thread.Thread.Id,
                 TurnId: turn.Turn.Id);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Caller cancellation must propagate so the coordinator can stop cleanly.
+            throw;
+        }
         catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested)
         {
             return new ModelGenerationResult(

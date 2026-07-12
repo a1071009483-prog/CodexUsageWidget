@@ -20,7 +20,8 @@ public sealed record InitializeResponse(
     [property: JsonPropertyName("codexHome")] string CodexHome,
     [property: JsonPropertyName("platformFamily")] string PlatformFamily,
     [property: JsonPropertyName("platformOs")] string PlatformOs,
-    [property: JsonPropertyName("userAgent")] string UserAgent);
+    [property: JsonPropertyName("userAgent")] string UserAgent,
+    [property: JsonPropertyName("capabilities")] JsonElement Capabilities = default);
 
 public sealed class AppServerNotificationEventArgs : EventArgs
 {

@@ -40,6 +40,8 @@ public sealed class AppServerProcess : IAsyncDisposable
         _log = log;
     }
 
+    public InitializeResponse? InitializeResult { get; private set; }
+
     public async Task<AppServerSession> StartAsync(CancellationToken cancellationToken)
     {
         if (Interlocked.Exchange(ref _started, 1) != 0)
@@ -64,7 +66,7 @@ public sealed class AppServerProcess : IAsyncDisposable
 
             _gateway = new CodexAppServerGateway(_connection);
 
-            await _gateway.InitializeAsync(_clientInformation, cancellationToken)
+            InitializeResult = await _gateway.InitializeAsync(_clientInformation, cancellationToken)
                 .ConfigureAwait(false);
 
             return new AppServerSession(_gateway, _connection.Completion);
