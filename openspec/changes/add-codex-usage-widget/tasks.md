@@ -25,12 +25,12 @@
 
 ## 4. Real-Time Usage Monitoring
 
-- [ ] 4.1 Implement five-hour bucket discovery from `windowDurationMins = 300` and robust weekly-bucket discovery from server duration/label metadata without positional assumptions.
-- [ ] 4.2 Normalize raw usage into clamped remaining percentage, UTC `resetsAt`, bucket availability, account scope, synchronization time, and freshness while preserving raw eligibility values.
-- [ ] 4.3 Implement immutable monitoring state publication and update-notification handling that reaches UI consumers within one second.
-- [ ] 4.4 Implement the 60-second read-only reconciliation loop, Refresh Now, missed-notification recovery, offline backoff, and App Server reconnection without creating threads or turns.
-- [ ] 4.5 Implement per-second local reset countdowns, the two-minute stale boundary, resume/clock-change resynchronization, and account/workspace transition invalidation.
-- [ ] 4.6 Add deterministic tests proving startup synchronization within 60 seconds, notification publication within one second, fallback convergence within 60 seconds, one-second countdown ticks, stale marking at 120 seconds, and zero monitoring `turn/start` calls.
+- [x] 4.1 Implement five-hour bucket discovery from `windowDurationMins = 300` and robust weekly-bucket discovery from server duration/label metadata without positional assumptions.
+- [x] 4.2 Normalize raw usage into clamped remaining percentage, UTC `resetsAt`, bucket availability, account scope, synchronization time, and freshness while preserving raw eligibility values.
+- [x] 4.3 Implement immutable monitoring state publication and update-notification handling that reaches UI consumers within one second.
+- [x] 4.4 Implement the 60-second read-only reconciliation loop, Refresh Now, missed-notification recovery, offline backoff, and App Server reconnection without creating threads or turns.
+- [x] 4.5 Implement per-second local reset countdowns, the two-minute stale boundary, resume/clock-change resynchronization, and account/workspace transition invalidation.
+- [x] 4.6 Add deterministic tests proving startup synchronization within 60 seconds, notification publication within one second, fallback convergence within 60 seconds, one-second countdown ticks, stale marking at 120 seconds, and zero monitoring `turn/start` calls.
 
 ## 5. Guarded Five-Hour Window Activation
 
