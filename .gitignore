@@ -1,6 +1,7 @@
 .dotnet/
 .artifacts/
 .superpowers/
+.worktrees/
 **/bin/
 **/obj/
 TestResults/
