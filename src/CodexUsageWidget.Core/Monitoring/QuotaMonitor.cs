@@ -26,6 +26,10 @@ public sealed class QuotaMonitor : IAsyncDisposable
     private bool _notificationPending;
     private bool _disposed;
     private TaskCompletionSource? _loopStartedTcs;
+    private readonly SemaphoreSlim _readSemaphore = new(1, 1);
+    private TaskCompletionSource? _refreshCompletion;
+    private DateTimeOffset _refreshOriginalNextReadAt;
+    private bool _refreshPending;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="QuotaMonitor"/> class.
@@ -108,6 +112,79 @@ public sealed class QuotaMonitor : IAsyncDisposable
 
         _runTask = RunLoopAsync(_cts.Token);
         await _loopStartedTcs.Task.WaitAsync(_cts.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Forces an immediate quota refresh without stopping the background loop.
+    /// The next scheduled poll remains aligned with the original cadence.
+    /// </summary>
+    /// <param name="cancellationToken">A cancellation token that can cancel the refresh wait.</param>
+    public async Task RefreshNowAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_cts is null)
+        {
+            throw new InvalidOperationException("The monitor has not been started.");
+        }
+
+        CancellationTokenSource? delayCts;
+        TaskCompletionSource? completion;
+
+        lock (_lock)
+        {
+            if (_refreshPending)
+            {
+                completion = _refreshCompletion;
+                delayCts = _currentDelayCts;
+            }
+            else
+            {
+                completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _refreshCompletion = completion;
+                _refreshPending = true;
+                _refreshOriginalNextReadAt = _nextReadAt;
+                _nextReadAt = _clock.UtcNow;
+                _notificationPending = false;
+                delayCts = _currentDelayCts;
+            }
+        }
+
+        delayCts?.Cancel();
+
+        try
+        {
+            await _readSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            lock (_lock)
+            {
+                _refreshPending = false;
+                _refreshCompletion = null;
+            }
+
+            completion?.TrySetCanceled(cancellationToken);
+            throw;
+        }
+
+        try
+        {
+            lock (_lock)
+            {
+                if (!_refreshPending)
+                {
+                    // The background loop served this refresh while we were waiting for the semaphore.
+                    return;
+                }
+            }
+
+            await ReadAndPublishAsync(ReadReason.Refresh, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _readSemaphore.Release();
+        }
     }
 
     /// <summary>
@@ -211,40 +288,49 @@ public sealed class QuotaMonitor : IAsyncDisposable
                 break;
             }
 
-            bool readForNotification;
-            bool readForPoll;
+            await _readSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
 
-            lock (_lock)
+            try
             {
-                readForNotification = _notificationPending;
+                bool readForNotification;
+                bool readForPoll;
+
+                lock (_lock)
+                {
+                    readForNotification = _notificationPending;
+
+                    if (readForNotification)
+                    {
+                        _notificationPending = false;
+
+                        if (_notificationDebounce > TimeSpan.Zero)
+                        {
+                            _nextReadAt = _clock.UtcNow + _notificationDebounce;
+                            continue;
+                        }
+                    }
+
+                    readForPoll = _clock.UtcNow >= _nextReadAt;
+                }
 
                 if (readForNotification)
                 {
-                    _notificationPending = false;
-
-                    if (_notificationDebounce > TimeSpan.Zero)
-                    {
-                        _nextReadAt = _clock.UtcNow + _notificationDebounce;
-                        continue;
-                    }
+                    await ReadAndPublishAsync(ReadReason.Notification, cancellationToken).ConfigureAwait(false);
+                    continue;
                 }
 
-                readForPoll = _clock.UtcNow >= _nextReadAt;
-            }
+                if (readForPoll)
+                {
+                    await ReadAndPublishAsync(ReadReason.Poll, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
 
-            if (readForNotification)
+                RepublishCountdown();
+            }
+            finally
             {
-                await ReadAndPublishAsync(ReadReason.Notification, cancellationToken).ConfigureAwait(false);
-                continue;
+                _readSemaphore.Release();
             }
-
-            if (readForPoll)
-            {
-                await ReadAndPublishAsync(ReadReason.Poll, cancellationToken).ConfigureAwait(false);
-                continue;
-            }
-
-            RepublishCountdown();
         }
     }
 
@@ -284,6 +370,11 @@ public sealed class QuotaMonitor : IAsyncDisposable
                 {
                     _backoff = TimeSpan.Zero;
                     _nextReadAt = syncedAt + _pollInterval;
+
+                    if (_refreshPending && _refreshOriginalNextReadAt > _clock.UtcNow)
+                    {
+                        _nextReadAt = _refreshOriginalNextReadAt;
+                    }
                 }
             }
             else
@@ -303,6 +394,17 @@ public sealed class QuotaMonitor : IAsyncDisposable
         }
 
         PublishSnapshot(snapshot);
+
+        TaskCompletionSource? refreshCompletion;
+
+        lock (_lock)
+        {
+            _refreshPending = false;
+            refreshCompletion = _refreshCompletion;
+            _refreshCompletion = null;
+        }
+
+        refreshCompletion?.TrySetResult();
     }
 
     private QuotaSnapshot BuildFailureSnapshot(QuotaSnapshot? previous, MonitoringConnectionState state)
@@ -429,5 +531,6 @@ public sealed class QuotaMonitor : IAsyncDisposable
         Startup,
         Poll,
         Notification,
+        Refresh,
     }
 }

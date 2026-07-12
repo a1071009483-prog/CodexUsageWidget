@@ -245,6 +245,44 @@ public sealed class QuotaMonitorTests : IAsyncLifetime, IDisposable
         }
     }
 
+    [Fact]
+    public async Task RefreshNowReadsImmediatelyAndPreservesPollCadence()
+    {
+        _source.EnqueueSuccess(FiveHourSnapshot(10));
+        QuotaMonitor monitor = new(_source, _clock, _delay);
+
+        await monitor.StartAsync();
+
+        try
+        {
+            int readsAfterStartup = _source.ReadCount;
+
+            _source.EnqueueSuccess(FiveHourSnapshot(20));
+            await AdvanceToAsync(Start + TimeSpan.FromSeconds(20));
+
+            Task refreshTask = monitor.RefreshNowAsync();
+            await WaitUntilAsync(() => _source.ReadCount == readsAfterStartup + 1);
+            await refreshTask;
+
+            Assert.Equal(readsAfterStartup + 1, _source.ReadCount);
+            Assert.Equal(20, monitor.CurrentSnapshot!.FiveHour.UsedPercent);
+            Assert.Equal(_clock.UtcNow, monitor.CurrentSnapshot.SyncedAt);
+
+            _source.EnqueueSuccess(FiveHourSnapshot(30));
+            await AdvanceToAsync(Start + TimeSpan.FromSeconds(59));
+            Assert.Equal(readsAfterStartup + 1, _source.ReadCount);
+
+            await AdvanceToAsync(Start + TimeSpan.FromSeconds(60));
+            await WaitUntilAsync(() => _source.ReadCount == readsAfterStartup + 2);
+
+            Assert.Equal(30, monitor.CurrentSnapshot.FiveHour.UsedPercent);
+        }
+        finally
+        {
+            await monitor.StopAsync();
+        }
+    }
+
     private async Task AdvanceToAsync(DateTimeOffset target)
     {
         while (_clock.UtcNow < target)

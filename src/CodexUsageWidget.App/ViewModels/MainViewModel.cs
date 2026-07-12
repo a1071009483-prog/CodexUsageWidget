@@ -52,10 +52,10 @@ public sealed class MainViewModel : ViewModelBase, ITrayCommandSource, IDisposab
         _startWithWindows = _startupRegistration.IsRegistered;
 
         ShowHideCommand = new RelayCommand(ToggleShowHide);
-        RefreshNowCommand = new RelayCommand(() => _ = RestartMonitorAsync());
+        RefreshNowCommand = new RelayCommand(() => _ = ForceRefreshAsync());
         ToggleAutomationCommand = new RelayCommand(ToggleAutomation);
         OpenAuditCommand = new RelayCommand(() => _shell.OpenAuditWindow());
-        ReconnectCommand = new RelayCommand(() => _ = RestartMonitorAsync());
+        ReconnectCommand = new RelayCommand(() => _ = ForceRefreshAsync());
         ExitCommand = new RelayCommand(() => _shell.Shutdown());
 
         _monitor.SnapshotChanged += OnSnapshotChanged;
@@ -236,13 +236,11 @@ public sealed class MainViewModel : ViewModelBase, ITrayCommandSource, IDisposab
         IsAutomationEnabled = !_isAutomationEnabled;
     }
 
-    private async Task RestartMonitorAsync()
+    private async Task ForceRefreshAsync()
     {
         try
         {
-            await _monitor.StopAsync(_lifetimeCts.Token).ConfigureAwait(false);
-            _monitor.SnapshotChanged += OnSnapshotChanged;
-            await _monitor.StartAsync(_lifetimeCts.Token).ConfigureAwait(false);
+            await _monitor.RefreshNowAsync(_lifetimeCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

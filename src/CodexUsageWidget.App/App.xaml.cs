@@ -109,7 +109,7 @@ public partial class App : System.Windows.Application
             clock,
             delay,
             pollInterval: TimeSpan.FromSeconds(30),
-            staleThreshold: TimeSpan.FromSeconds(60));
+            staleThreshold: TimeSpan.FromSeconds(120));
         AccountIdentity identity = new("design@local.invalid", "design", "global");
         IDispatcher dispatcher = new WpfDispatcher();
 
