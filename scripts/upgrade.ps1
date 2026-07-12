@@ -16,7 +16,7 @@ $appName = 'CodexUsageWidget'
 
 if ([string]::IsNullOrWhiteSpace($SourceDirectory)) {
     $repoRoot = Split-Path -Parent $PSScriptRoot
-    $SourceDirectory = Join-Path $repoRoot 'artifacts' 'publish' 'win-x64' 'Release'
+    $SourceDirectory = Join-Path (Join-Path (Join-Path (Join-Path $repoRoot 'artifacts') 'publish') 'win-x64') 'Release'
 }
 
 if ([string]::IsNullOrWhiteSpace($InstallDirectory)) {

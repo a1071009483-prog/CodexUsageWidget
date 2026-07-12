@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Windows;
 using System.Windows.Forms;
 using System.Windows.Threading;
@@ -10,8 +11,12 @@ using CodexUsageWidget.App.Views;
 using CodexUsageWidget.Core.Abstractions;
 using CodexUsageWidget.Core.Activation;
 using CodexUsageWidget.Core.Monitoring;
+using CodexUsageWidget.Infrastructure.AppServer;
+using CodexUsageWidget.Infrastructure.AppServer.Protocol;
 using CodexUsageWidget.Infrastructure.IO;
 using CodexUsageWidget.Infrastructure.Logging;
+using CodexUsageWidget.Infrastructure.Persistence;
+using CodexUsageWidget.Infrastructure.Security;
 using CodexUsageWidget.Infrastructure.Settings;
 using CodexUsageWidget.Infrastructure.Time;
 using CodexUsageWidget.Infrastructure.Windows;
@@ -35,6 +40,9 @@ public partial class App : System.Windows.Application
     private SingleInstanceCoordinator? _singleInstance;
     private JsonSettingsStore? _settingsStore;
     private CrashReportWriter? _crashReportWriter;
+    private AppServerSupervisor? _appServerSupervisor;
+    private AppServerQuotaSource? _appServerQuotaSource;
+    private ProtectedSaltStore? _saltStore;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -93,10 +101,15 @@ public partial class App : System.Windows.Application
 
         IUserNotifier notifier = new WindowsNotificationService(notifyIcon);
         IDelay delay = new TaskDelay();
-        IQuotaSource quotaSource = new DesignQuotaSource();
-        IActivationCoordinator activationCoordinator = new NoOpActivationCoordinator();
+        (IQuotaSource quotaSource, IActivationCoordinator activationCoordinator) =
+            await CreateLiveServicesAsync(localAppData, clock, delay, notifier).ConfigureAwait(true);
 
-        _monitor = new QuotaMonitor(quotaSource, clock, delay);
+        _monitor = new QuotaMonitor(
+            quotaSource,
+            clock,
+            delay,
+            pollInterval: TimeSpan.FromSeconds(30),
+            staleThreshold: TimeSpan.FromSeconds(60));
         AccountIdentity identity = new("design@local.invalid", "design", "global");
         IDispatcher dispatcher = new WpfDispatcher();
 
@@ -191,6 +204,130 @@ public partial class App : System.Windows.Application
                 // Non-fatal on exit.
             }
         }
+
+        _appServerQuotaSource?.Dispose();
+
+        if (_appServerSupervisor is not null)
+        {
+            try
+            {
+                await _appServerSupervisor.DisposeAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Non-fatal on exit.
+            }
+        }
+
+        _saltStore?.Dispose();
+    }
+
+    private async Task<(IQuotaSource QuotaSource, IActivationCoordinator ActivationCoordinator)> CreateLiveServicesAsync(
+        string localAppData,
+        IClock clock,
+        IDelay delay,
+        IUserNotifier notifier)
+    {
+        string dataDirectory = System.IO.Path.Combine(localAppData, AppName, "Data");
+        string appServerWorkingDirectory = System.IO.Path.Combine(dataDirectory, "app-server");
+        Directory.CreateDirectory(appServerWorkingDirectory);
+
+        CodexExecutableResolution resolution = CodexExecutableLocator.CreateSystem().Locate();
+        if (!resolution.Found)
+        {
+            return (new DesignQuotaSource(), new NoOpActivationCoordinator());
+        }
+
+        try
+        {
+            UsageStateDatabase database = new(dataDirectory);
+            IProtectedData protectedData = new DpapiProtectedData();
+            _saltStore = new ProtectedSaltStore(dataDirectory, protectedData);
+            IAccountNamespaceHasher namespaceHasher = new AccountNamespaceHasher(_saltStore);
+            IAuditStore auditStore = new SqliteAuditStore(database);
+            IActivationLockStore lockStore = new ActivationLockStore(database);
+            ICleanupWorkStore cleanupStore = new SqliteCleanupWorkStore(database);
+
+            ProcessStartRequest startRequest = new(
+                resolution.Command!,
+                ["app-server"],
+                appServerWorkingDirectory);
+
+            _appServerSupervisor = new AppServerSupervisor(
+                new SystemProcessHost(),
+                startRequest,
+                new ClientInformation("codex-usage-widget", "1.0.0", "Codex Usage Widget"),
+                TimeSpan.FromSeconds(5),
+                delay,
+                AppServerSupervisorSettings.Default,
+                healthyDelay: delay,
+                graceDelay: delay,
+                log: new NullRedactingLog());
+
+            _appServerQuotaSource = new AppServerQuotaSource(_appServerSupervisor);
+            IModelCatalog modelCatalog = new AppServerModelCatalog(_appServerSupervisor);
+            IModelBoundary modelBoundary = new CurrentGenerationModelBoundary(_appServerSupervisor);
+
+            ActivationCoordinator coordinator = new(
+                lockStore,
+                modelCatalog,
+                modelBoundary,
+                _appServerQuotaSource,
+                auditStore,
+                cleanupStore,
+                namespaceHasher,
+                notifier,
+                clock,
+                delay,
+                new ActivationCoordinatorOptions
+                {
+                    IsAutomationEnabled = true,
+                    WorkingDirectory = appServerWorkingDirectory,
+                });
+
+            using var startupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var readyTcs = new TaskCompletionSource();
+            EventHandler<AppServerSupervisorEventArgs> onReady = (_, _) => readyTcs.TrySetResult();
+            _appServerSupervisor.SessionPublished += onReady;
+            try
+            {
+                _ = _appServerSupervisor.StartAsync(startupCts.Token);
+                await readyTcs.Task.WaitAsync(startupCts.Token).ConfigureAwait(true);
+            }
+            finally
+            {
+                _appServerSupervisor.SessionPublished -= onReady;
+            }
+
+            return (_appServerQuotaSource, coordinator);
+        }
+        catch
+        {
+            await DisposeLiveServicesAsync().ConfigureAwait(false);
+            return (new DesignQuotaSource(), new NoOpActivationCoordinator());
+        }
+    }
+
+    private async Task DisposeLiveServicesAsync()
+    {
+        _appServerQuotaSource?.Dispose();
+        _appServerQuotaSource = null;
+
+        if (_appServerSupervisor is not null)
+        {
+            try
+            {
+                await _appServerSupervisor.DisposeAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+
+            _appServerSupervisor = null;
+        }
+
+        _saltStore?.Dispose();
+        _saltStore = null;
     }
 
     private void OnMainViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -209,6 +346,7 @@ public partial class App : System.Windows.Application
             _ = _settingsStore.SaveAsync(updated);
         }
     }
+
     private async void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         e.Handled = true;
@@ -216,7 +354,7 @@ public partial class App : System.Windows.Application
         {
             try
             {
-                await _crashReportWriter.WriteAsync(e.Exception, CancellationToken.None).ConfigureAwait(false);
+                await _crashReportWriter.WriteAsync(e.Exception, CancellationToken.None).ConfigureAwait(true);
             }
             catch
             {

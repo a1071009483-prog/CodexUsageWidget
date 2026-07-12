@@ -8,7 +8,7 @@ public sealed class WpfProjectTests
     [Fact]
     public void AppProjectBuildsAWindowsPresentationApplication()
     {
-        Assembly appAssembly = Assembly.Load("CodexUsageWidget.App");
+        Assembly appAssembly = Assembly.Load("CodexUsageWidget");
         Type? applicationType = appAssembly.GetType("CodexUsageWidget.App.App");
 
         Assert.NotNull(applicationType);

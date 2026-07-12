@@ -22,15 +22,23 @@ if (Get-ItemProperty -LiteralPath $runKey -Name $appName -ErrorAction SilentlyCo
 }
 
 $startMenu = [Environment]::GetFolderPath('StartMenu')
-$shortcutPath = Join-Path $startMenu 'Programs' "$appName.lnk"
+$shortcutPath = Join-Path (Join-Path $startMenu 'Programs') "$appName.lnk"
 if (Test-Path -LiteralPath $shortcutPath -PathType Leaf) {
     Remove-Item -LiteralPath $shortcutPath -Force
     Write-Host "Removed start-menu shortcut."
 }
 
 if (Test-Path -LiteralPath $InstallDirectory -PathType Container) {
-    Remove-Item -LiteralPath $InstallDirectory -Recurse -Force
-    Write-Host "Removed installation directory: $InstallDirectory"
+    $children = Get-ChildItem -LiteralPath $InstallDirectory -Force
+    foreach ($child in $children) {
+        if ($child.Name -eq 'Data') {
+            continue
+        }
+
+        Remove-Item -LiteralPath $child.FullName -Recurse -Force
+    }
+
+    Write-Host "Removed application files from: $InstallDirectory"
 }
 
 if ($RemoveLocalData) {

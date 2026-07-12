@@ -18,7 +18,7 @@ $solution = Join-Path $repoRoot 'CodexUsageWidget.sln'
 $appProject = Join-Path $repoRoot 'src\CodexUsageWidget.App\CodexUsageWidget.App.csproj'
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $OutputDirectory = Join-Path $repoRoot 'artifacts' 'publish' $RuntimeIdentifier $Configuration
+    $OutputDirectory = Join-Path (Join-Path (Join-Path (Join-Path $repoRoot 'artifacts') 'publish') $RuntimeIdentifier) $Configuration
 }
 
 $dotnet = Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue

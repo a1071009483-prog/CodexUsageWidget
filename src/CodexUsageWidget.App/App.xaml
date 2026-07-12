@@ -59,7 +59,7 @@
                             Foreground="{Binding ColorState, Converter={StaticResource ColorStateBrushConverter}}"
                             Maximum="100"
                             Minimum="0"
-                            Value="{Binding ProgressValue}" />
+                            Value="{Binding ProgressValue, Mode=OneWay}" />
 
                         <Grid
                             Grid.Row="2"

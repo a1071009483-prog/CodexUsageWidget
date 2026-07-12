@@ -41,13 +41,14 @@ public sealed class ReadOnlyAuthenticatedSmokeTest
             source,
             new SystemClock(),
             new TaskDelay(),
-            pollInterval: TimeSpan.FromSeconds(60),
-            staleThreshold: TimeSpan.FromSeconds(120));
+            pollInterval: TimeSpan.FromSeconds(30),
+            staleThreshold: TimeSpan.FromSeconds(60));
 
         try
         {
             using var startupCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            await supervisor.StartAsync(startupCts.Token);
+            _ = supervisor.StartAsync(startupCts.Token);
+            await WaitForGenerationAsync(supervisor, TimeSpan.FromSeconds(60));
             await monitor.StartAsync(startupCts.Token);
 
             QuotaSnapshot snapshot = await WaitForFreshSnapshotAsync(monitor, TimeSpan.FromSeconds(60));
@@ -82,8 +83,8 @@ public sealed class ReadOnlyAuthenticatedSmokeTest
             DateTimeOffset initialSyncedAt = snapshot.SyncedAt;
             QuotaSnapshot reconciled = await WaitForReconciliationAsync(
                 monitor,
-                initialSyncedAt + TimeSpan.FromSeconds(55),
-                TimeSpan.FromSeconds(75));
+                initialSyncedAt + TimeSpan.FromSeconds(25),
+                TimeSpan.FromSeconds(50));
             Assert.True(reconciled.SyncedAt > initialSyncedAt, "The snapshot should be refreshed by the reconciliation poll.");
         }
         finally
@@ -105,6 +106,28 @@ public sealed class ReadOnlyAuthenticatedSmokeTest
             {
                 // Best-effort cleanup; the App Server child may still hold files briefly.
             }
+        }
+    }
+
+    private static async Task WaitForGenerationAsync(
+        AppServerSupervisor supervisor,
+        TimeSpan timeout)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
+        while (true)
+        {
+            AppServerGenerationSession? generation = supervisor.CurrentGeneration;
+            if (generation is not null)
+            {
+                return;
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                throw new TimeoutException("The App Server session was not published in time.");
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(200));
         }
     }
 

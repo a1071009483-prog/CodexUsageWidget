@@ -116,7 +116,10 @@ public sealed class QuotaMonitor : IAsyncDisposable
     /// <param name="cancellationToken">A cancellation token that can stop waiting for shutdown.</param>
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_disposed)
+        {
+            return;
+        }
 
         if (_cts is null)
         {
@@ -154,8 +157,8 @@ public sealed class QuotaMonitor : IAsyncDisposable
             return;
         }
 
-        _disposed = true;
         await StopAsync().ConfigureAwait(false);
+        _disposed = true;
     }
 
     private async Task RunLoopAsync(CancellationToken cancellationToken)

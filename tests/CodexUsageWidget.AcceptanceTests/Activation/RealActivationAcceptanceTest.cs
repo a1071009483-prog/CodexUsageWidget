@@ -69,15 +69,15 @@ public sealed class RealActivationAcceptanceTest
             source,
             new SystemClock(),
             new TaskDelay(),
-            pollInterval: TimeSpan.FromSeconds(60),
-            staleThreshold: TimeSpan.FromSeconds(120));
+            pollInterval: TimeSpan.FromSeconds(30),
+            staleThreshold: TimeSpan.FromSeconds(60));
 
         ProtectedSaltStore? saltStore = null;
 
         try
         {
             using var testCts = new CancellationTokenSource(TimeSpan.FromSeconds(180));
-            await supervisor.StartAsync(testCts.Token);
+            _ = supervisor.StartAsync(testCts.Token);
             await monitor.StartAsync(testCts.Token);
 
             AppServerGenerationSession generation = await WaitForGenerationAsync(supervisor, TimeSpan.FromSeconds(60), testCts.Token);
