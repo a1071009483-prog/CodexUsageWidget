@@ -271,7 +271,11 @@ public sealed class QuotaMonitor : IAsyncDisposable
             {
                 DateTimeOffset syncedAt = _clock.UtcNow;
                 snapshot = QuotaNormalizer.Normalize(result.Snapshot, syncedAt, MonitoringConnectionState.Connected);
-                snapshot = snapshot with { Countdown = ComputeCountdown(snapshot.FiveHour) };
+                snapshot = snapshot with
+                {
+                    Countdown = ComputeCountdown(snapshot.FiveHour),
+                    WeeklyCountdown = ComputeCountdown(snapshot.Weekly),
+                };
 
                 lock (_lock)
                 {
@@ -309,6 +313,7 @@ public sealed class QuotaMonitor : IAsyncDisposable
                 IsFresh = false,
                 ConnectionState = state,
                 Countdown = ComputeCountdown(previous.FiveHour),
+                WeeklyCountdown = ComputeCountdown(previous.Weekly),
             };
         }
 
@@ -319,6 +324,7 @@ public sealed class QuotaMonitor : IAsyncDisposable
             now,
             false,
             state,
+            null,
             null);
     }
 
@@ -362,6 +368,7 @@ public sealed class QuotaMonitor : IAsyncDisposable
         {
             IsFresh = isFresh,
             Countdown = ComputeCountdown(current.FiveHour),
+            WeeklyCountdown = ComputeCountdown(current.Weekly),
         };
 
         PublishSnapshot(updated);

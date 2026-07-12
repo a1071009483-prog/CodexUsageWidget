@@ -53,6 +53,7 @@ public static class QuotaNormalizer
             syncedAt,
             true,
             connectionState,
+            null,
             null);
     }
 

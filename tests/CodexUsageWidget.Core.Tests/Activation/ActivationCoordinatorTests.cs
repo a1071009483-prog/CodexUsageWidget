@@ -441,7 +441,8 @@ public sealed class ActivationCoordinatorTests : IDisposable
             SyncedAt: Now,
             IsFresh: fresh,
             MonitoringConnectionState.Connected,
-            Countdown: null);
+            Countdown: null,
+            WeeklyCountdown: null);
     }
 
     private static RawRateLimitSnapshot Raw(int used, long? resetsAt) =>

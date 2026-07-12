@@ -143,7 +143,8 @@ public sealed class ActivationEligibilityTests
             SyncedAt: Now,
             IsFresh: fresh,
             MonitoringConnectionState.Connected,
-            Countdown: null);
+            Countdown: null,
+            WeeklyCountdown: null);
     }
 
     private static ActivationAttempt ActiveAttempt(DateTimeOffset suppressionDeadline) =>

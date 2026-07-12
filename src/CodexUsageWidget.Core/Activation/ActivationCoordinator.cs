@@ -9,7 +9,7 @@ namespace CodexUsageWidget.Core.Activation;
 /// per scoped window through durable write-ahead locking, two consecutive confirmations,
 /// a final read-only preflight, curated model selection, and read-only verification.
 /// </summary>
-public sealed class ActivationCoordinator
+public sealed class ActivationCoordinator : IActivationCoordinator
 {
     private const string PromptText = "Respond with exactly the word 'OK' and do not use any tools.";
 

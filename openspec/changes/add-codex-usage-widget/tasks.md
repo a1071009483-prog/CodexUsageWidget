@@ -47,15 +47,15 @@
 
 ## 6. Floating Widget and Tray Experience
 
-- [ ] 6.1 Implement the resident WPF application shell, borderless draggable topmost widget, hide-without-exit behavior, and connection/monitor/activation view models.
-- [ ] 6.2 Implement separate `5h` and `Weekly` cards with remaining percentage, progress, reset countdown, last synchronization time, status, unavailable/stale presentation, and the exact rounded-active label `100%·计时已启动`.
-- [ ] 6.3 Apply normal, warning, and critical presentation thresholds at greater than 30%, greater than 10% through 30%, and 10% or less remaining for both quota cards.
-- [ ] 6.4 Implement tray actions for Show/Hide, Refresh Now, Pause/Resume Automatic Triggering, Start with Windows, Audit, Reconnect, and Exit, with no force-consume action.
-- [ ] 6.5 Implement deduplicated Windows notifications for activation success, failure/fail-closed outcomes, and authentication requirements while keeping normal polling silent.
-- [ ] 6.6 Implement the local audit view using only redacted metadata, including model fallback visibility and pending cleanup status.
-- [ ] 6.7 Persist and restore widget position and size safely across restarts, removed monitors, work-area changes, and per-monitor DPI changes.
-- [ ] 6.8 Implement per-user Windows startup registration, default startup/automatic-trigger settings, preference persistence, and safety overrides that keep activation disabled when state is invalid.
-- [ ] 6.9 Add WPF/view-model tests for quota rendering, active-but-rounded 100% state, stale data, color boundaries, tray commands, notifications, single-instance signaling, startup preferences, and multi-monitor placement logic.
+- [x] 6.1 Implement the resident WPF application shell, borderless draggable topmost widget, hide-without-exit behavior, and connection/monitor/activation view models.
+- [x] 6.2 Implement separate `5h` and `Weekly` cards with remaining percentage, progress, reset countdown, last synchronization time, status, unavailable/stale presentation, and the exact rounded-active label `100%·计时已启动`.
+- [x] 6.3 Apply normal, warning, and critical presentation thresholds at greater than 30%, greater than 10% through 30%, and 10% or less remaining for both quota cards.
+- [x] 6.4 Implement tray actions for Show/Hide, Refresh Now, Pause/Resume Automatic Triggering, Start with Windows, Audit, Reconnect, and Exit, with no force-consume action.
+- [x] 6.5 Implement deduplicated Windows notifications for activation success, failure/fail-closed outcomes, and authentication requirements while keeping normal polling silent.
+- [x] 6.6 Implement the local audit view using only redacted metadata, including model fallback visibility and pending cleanup status.
+- [x] 6.7 Persist and restore widget position and size safely across restarts, removed monitors, work-area changes, and per-monitor DPI changes.
+- [x] 6.8 Implement per-user Windows startup registration, default startup/automatic-trigger settings, preference persistence, and safety overrides that keep activation disabled when state is invalid.
+- [x] 6.9 Add WPF/view-model tests for quota rendering, active-but-rounded 100% state, stale data, color boundaries, tray commands, notifications, single-instance signaling, startup preferences, and multi-monitor placement logic.
 
 ## 7. Packaging, Security, and End-to-End Verification
 

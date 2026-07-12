@@ -1,0 +1,52 @@
+<Window
+    x:Class="CodexUsageWidget.App.Views.AuditWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="clr-namespace:CodexUsageWidget.App.ViewModels"
+    Title="审计日志"
+    Width="640"
+    Height="420"
+    MinWidth="480"
+    MinHeight="280"
+    WindowStartupLocation="CenterOwner"
+    mc:Ignorable="d"
+    d:DataContext="{d:DesignInstance Type=vm:AuditViewModel, IsDesignTimeCreatable=False}">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock
+                VerticalAlignment="Center"
+                FontSize="14"
+                FontWeight="SemiBold"
+                Text="本地脱敏审计日志" />
+            <Button
+                Margin="12,0,0,0"
+                Padding="8,2"
+                Command="{Binding RefreshCommand}"
+                Content="刷新" />
+        </StackPanel>
+
+        <DataGrid
+            Grid.Row="1"
+            AutoGenerateColumns="False"
+            IsReadOnly="True"
+            ItemsSource="{Binding Rows}"
+            GridLinesVisibility="Horizontal">
+            <DataGrid.Columns>
+                <DataGridTextColumn Binding="{Binding RecordedAt}" Header="时间" Width="130" />
+                <DataGridTextColumn Binding="{Binding AttemptId}" Header="尝试 ID" Width="180" />
+                <DataGridTextColumn Binding="{Binding ModelId}" Header="模型" Width="120" />
+                <DataGridTextColumn Binding="{Binding PreUsedPercent}" Header="前置用量%" Width="90" />
+                <DataGridTextColumn Binding="{Binding PostUsedPercent}" Header="后置用量%" Width="90" />
+                <DataGridTextColumn Binding="{Binding Outcome}" Header="结果" Width="100" />
+                <DataGridTextColumn Binding="{Binding ErrorCategory}" Header="错误类型" Width="120" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</Window>

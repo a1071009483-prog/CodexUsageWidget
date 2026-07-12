@@ -106,7 +106,8 @@ public sealed record QuotaSnapshot(
     DateTimeOffset SyncedAt,
     bool IsFresh,
     MonitoringConnectionState ConnectionState,
-    TimeSpan? Countdown)
+    TimeSpan? Countdown,
+    TimeSpan? WeeklyCountdown)
 {
     /// <summary>
     /// Gets the eligibility input for the five-hour bucket.
