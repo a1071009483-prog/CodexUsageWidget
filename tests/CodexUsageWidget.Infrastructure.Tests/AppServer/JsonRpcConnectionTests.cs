@@ -209,6 +209,34 @@ public sealed class JsonRpcConnectionTests
         Assert.True(queued.IsCompleted);
     }
 
+    [Fact]
+    public async Task NotificationHandlerExceptionDoesNotFaultConnection()
+    {
+        var transport = new AsyncLineTransport();
+        await using var connection = new JsonRpcConnection(
+            transport.ServerOutput,
+            transport.ClientInput);
+        connection.NotificationReceived += (_, _) => throw new InvalidOperationException("boom");
+        await connection.StartAsync(CancellationToken.None);
+
+        transport.ServerOutput.WriteLine(
+            "{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"primary\":{\"usedPercent\":4}}}}");
+
+        // Give the read loop time to dispatch the notification and swallow the
+        // subscriber exception.
+        await Task.Delay(200);
+
+        // The connection must still process subsequent requests.
+        Task<JsonElement> request = connection.SendRequestAsync<JsonElement>(
+            "account/read",
+            new { },
+            CancellationToken.None);
+        JsonElement outbound = Parse(await transport.ClientInput.ReadLineAsync());
+        transport.ServerOutput.WriteLine(
+            Success(outbound.GetProperty("id").GetInt64(), "{\"ok\":true}"));
+        Assert.True((await request).GetProperty("ok").GetBoolean());
+    }
+
     private static JsonElement Parse(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
     private static string Success(long id, string resultJson) => JsonSerializer.Serialize(new

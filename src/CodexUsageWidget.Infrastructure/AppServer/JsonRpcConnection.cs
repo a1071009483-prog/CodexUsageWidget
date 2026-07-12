@@ -15,6 +15,7 @@ public sealed class JsonRpcConnection : IAsyncDisposable
 
     private readonly TextReader _input;
     private readonly TextWriter _output;
+    private readonly IRedactingLog? _log;
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pending = new();
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly CancellationTokenSource _shutdown = new();
@@ -31,7 +32,7 @@ public sealed class JsonRpcConnection : IAsyncDisposable
     {
         _input = input ?? throw new ArgumentNullException(nameof(input));
         _output = output ?? throw new ArgumentNullException(nameof(output));
-        _ = log;
+        _log = log;
     }
 
     public event EventHandler<AppServerNotificationEventArgs>? NotificationReceived
@@ -184,7 +185,7 @@ public sealed class JsonRpcConnection : IAsyncDisposable
                         "The App Server connection ended unexpectedly.");
                 }
 
-                ProcessMessage(line);
+                await ProcessMessageAsync(line).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
@@ -207,7 +208,7 @@ public sealed class JsonRpcConnection : IAsyncDisposable
         }
     }
 
-    private void ProcessMessage(string line)
+    private async ValueTask ProcessMessageAsync(string line)
     {
         JsonElement root;
         try
@@ -247,15 +248,37 @@ public sealed class JsonRpcConnection : IAsyncDisposable
                     throw Malformed("The App Server sent a malformed request id.");
                 }
 
-                _serverRequestReceived?.Invoke(
-                    this,
-                    new AppServerRequestEventArgs(idElement.Clone(), method, parameters));
+                try
+                {
+                    _serverRequestReceived?.Invoke(
+                        this,
+                        new AppServerRequestEventArgs(idElement.Clone(), method, parameters));
+                }
+                catch (Exception ex)
+                {
+                    // A subscriber must not be able to kill the read loop and
+                    // fault the entire connection.
+                    await LogHandlerExceptionAsync(
+                        "ServerRequestHandlerFailed",
+                        method,
+                        ex).ConfigureAwait(false);
+                }
             }
             else
             {
-                _notificationReceived?.Invoke(
-                    this,
-                    new AppServerNotificationEventArgs(method, parameters));
+                try
+                {
+                    _notificationReceived?.Invoke(
+                        this,
+                        new AppServerNotificationEventArgs(method, parameters));
+                }
+                catch (Exception ex)
+                {
+                    await LogHandlerExceptionAsync(
+                        "NotificationHandlerFailed",
+                        method,
+                        ex).ConfigureAwait(false);
+                }
             }
 
             return;
@@ -296,6 +319,28 @@ public sealed class JsonRpcConnection : IAsyncDisposable
         }
 
         pending.TrySetException(remoteError!);
+    }
+
+    private async ValueTask LogHandlerExceptionAsync(
+        string eventName,
+        string method,
+        Exception ex)
+    {
+        if (_log is null)
+        {
+            return;
+        }
+
+        await _log.WriteAsync(
+            new StructuredLogEvent(
+                RedactingLogLevel.Warning,
+                eventName,
+                new Dictionary<string, string?>
+                {
+                    ["method"] = method,
+                    ["exceptionType"] = ex.GetType().FullName,
+                }),
+            CancellationToken.None).ConfigureAwait(false);
     }
 
     private async ValueTask WriteMessageAsync(object message, CancellationToken cancellationToken)
