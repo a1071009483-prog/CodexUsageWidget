@@ -2,6 +2,7 @@
 .artifacts/
 .superpowers/
 .worktrees/
+artifacts/
 **/bin/
 **/obj/
 TestResults/
