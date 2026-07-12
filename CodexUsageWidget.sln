@@ -1,4 +1,4 @@
-Microsoft Visual Studio Solution File, Format Version 12.00
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
@@ -15,6 +15,10 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodexUsageWidget.App.Tests", "tests\CodexUsageWidget.App.Tests\CodexUsageWidget.App.Tests.csproj", "{F6666666-6666-4666-8666-666666666666}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FakeCodexAppServer", "tests\FakeCodexAppServer\FakeCodexAppServer.csproj", "{A7777777-7777-4777-8777-777777777777}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{8A4B208E-2A02-4484-9728-CD83982E068C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodexUsageWidget.AcceptanceTests", "tests\CodexUsageWidget.AcceptanceTests\CodexUsageWidget.AcceptanceTests.csproj", "{0CE5A774-7778-466F-B3AD-8993FF363DB3}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -50,8 +54,15 @@ Global
 		{A7777777-7777-4777-8777-777777777777}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A7777777-7777-4777-8777-777777777777}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A7777777-7777-4777-8777-777777777777}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0CE5A774-7778-466F-B3AD-8993FF363DB3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0CE5A774-7778-466F-B3AD-8993FF363DB3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0CE5A774-7778-466F-B3AD-8993FF363DB3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0CE5A774-7778-466F-B3AD-8993FF363DB3}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{0CE5A774-7778-466F-B3AD-8993FF363DB3} = {8A4B208E-2A02-4484-9728-CD83982E068C}
 	EndGlobalSection
 EndGlobal
