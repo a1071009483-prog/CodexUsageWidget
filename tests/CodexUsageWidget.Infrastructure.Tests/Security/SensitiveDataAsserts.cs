@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using System.Text;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace CodexUsageWidget.Infrastructure.Tests.Security;
@@ -26,8 +27,17 @@ internal static class SensitiveDataAsserts
     ];
 
     /// <summary>
+    /// Matches common OpenAI-style API key prefixes while avoiding false positives
+    /// on ordinary words such as "skip" or "sky".
+    /// </summary>
+    private static readonly Regex ApiKeyPattern = new(
+        @"sk-[a-zA-Z0-9_-]{10,}",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    /// <summary>
     /// Asserts that <paramref name="content"/> contains none of the forbidden literals
-    /// and no common credential prefixes.
+    /// and no common credential patterns.
     /// </summary>
     public static void AssertContainsNoSensitiveData(string content)
     {
@@ -38,7 +48,7 @@ internal static class SensitiveDataAsserts
             Assert.DoesNotContain(literal, content, StringComparison.Ordinal);
         }
 
-        Assert.DoesNotContain("sk-", content, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotMatch(ApiKeyPattern, content);
         Assert.DoesNotContain("Bearer ", content, StringComparison.Ordinal);
     }
 
