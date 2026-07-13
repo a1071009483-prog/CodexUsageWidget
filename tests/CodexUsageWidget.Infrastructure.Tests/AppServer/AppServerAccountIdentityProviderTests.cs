@@ -40,6 +40,25 @@ public sealed class AppServerAccountIdentityProviderTests
     }
 
     [Fact]
+    public async Task OpenAiAuthRequiredWithPresentAccountStillSupported()
+    {
+        // requiresOpenaiAuth: true is the normal state for OpenAI-hosted ChatGPT
+        // accounts and does not mean authentication is missing.
+        AppServerAccountIdentityProvider provider = new(
+            _ => Task.FromResult(
+                new AccountReadResponse(
+                    true,
+                    new AccountDescriptor("chatgpt", "user@example.com", "plus"))),
+            Evaluator);
+
+        AccountIdentity identity = await provider.GetIdentityAsync();
+
+        Assert.Equal("user@example.com", identity.Email);
+        Assert.Equal("plus", identity.Plan);
+        Assert.Equal("global", identity.WorkspaceScope);
+    }
+
+    [Fact]
     public async Task UnsupportedAccountTypeThrows()
     {
         AppServerAccountIdentityProvider provider = new(

@@ -29,11 +29,11 @@ public sealed class AccountAuthenticationEvaluator
     {
         ArgumentNullException.ThrowIfNull(response);
 
-        if (response.RequiresOpenaiAuth || response.Account is null)
+        if (response.Account is null)
         {
             return new AuthenticationAssessment(
                 AuthenticationState.Required,
-                response.Account?.PlanType,
+                null,
                 null,
                 GlobalWorkspaceIdentity,
                 "ChatGPT authentication is required.");
