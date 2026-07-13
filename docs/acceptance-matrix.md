@@ -92,8 +92,8 @@ complete. Items marked **automated** are covered by xUnit tests. Items marked
 | 7.2 | Fake-server E2E scenarios and integration coverage for external usage, account switching, sleep/resume, network loss, App Server restarts, stale cached 100%, cleanup failure, and the narrow external-use race | `AppServerEndToEndTests.cs` (fake-server restart/notification/retired generation), `ActivationCoordinatorTests.cs` (external usage, cleanup failure, narrow race, model fallback), `AppServerSupervisorTests.cs` (supervisor restart/recovery), `QuotaMonitorTests.cs` (stale 100% / stale boundary), `AppServerModelBoundaryTests.cs` (thread/turn/delete lifecycle) | ✅ | Test output |
 | 7.3 | Self-contained publish and per-user install/uninstall | `scripts/package.ps1`, `scripts/install.ps1`, `scripts/uninstall.ps1` | ✅ | Build artifacts |
 | 7.4 | Manual install/first-run/startup/pause/upgrade/rollback/uninstall | 🖥️ Manual | ✅ | Executed `scripts/package.ps1`, `install.ps1`, `upgrade.ps1`, `rollback.ps1`, and both `uninstall.ps1` modes; see notes below. |
-| 7.5 | Authenticated read-only smoke test | `ReadOnlyAuthenticatedSmokeTest.cs` | ✅ | Passed against real Codex CLI on Windows; see notes below. |
-| 7.6 | Real activation acceptance test | `RealActivationAcceptanceTest.cs` | ⏳ | Approved, but blocked on ChatGPT authentication (`codex login`). Test failed fast before any `turn/start`. |
+| 7.5 | Authenticated read-only smoke test | `ReadOnlyAuthenticatedSmokeTest.cs` | ⏳ | Previously passed against real Codex CLI on Windows. Currently the connected ChatGPT-backed account returns only a weekly bucket (`windowDurationMins = 10080`) with no five-hour bucket, so the test fails at the five-hour availability assertion. The authentication-state misclassification was fixed in commit `06e5e60`. |
+| 7.6 | Real activation acceptance test | `RealActivationAcceptanceTest.cs` | ⏳ | Approved, harness ready, but blocked on an account/plan that exposes a fully unused five-hour Codex bucket. No `turn/start` has been issued. |
 | 7.7 | Full automated suite and final acceptance matrix | 🖥️ Manual + automated | ✅ | `dotnet test CodexUsageWidget.sln` passes; spot-checks covered by fake-server E2E and smoke test. |
 | 7.8 | User documentation | `docs/install.md`, `docs/usage.md`, `docs/security.md`, `docs/troubleshooting.md` | ✅ | This repo |
 
@@ -155,7 +155,7 @@ Checklist (verified on Windows):
 
 ### 7.5 Authenticated read-only smoke test
 
-Prerequisites: Windows, `codex login` completed, ChatGPT-backed account.
+Prerequisites: Windows, `codex login` completed, ChatGPT-backed account that exposes a five-hour bucket (`windowDurationMins = 300`).
 
 ```powershell
 $env:CODEX_ACCEPTANCE_DATA_PATH = "$env:LOCALAPPDATA\CodexUsageWidget-Acceptance"
@@ -167,7 +167,7 @@ dotnet test tests\CodexUsageWidget.AcceptanceTests `
   --filter "FullyQualifiedName~ReadOnlyAuthenticatedSmokeTest"
 ```
 
-Expected evidence (verified):
+Expected evidence (verified on a previous run with a five-hour bucket):
 
 - [x] Test discovers the five-hour bucket (`windowDurationMins = 300`).
 - [x] Test discovers the weekly bucket (duration close to 10080 minutes).
@@ -177,6 +177,12 @@ Expected evidence (verified):
       30 seconds to keep the real App Server connection alive, satisfying the
       60-second maximum reconciliation requirement).
 - [x] No `turn/start` call is issued.
+
+> **Current status (2026-07-13):** The connected ChatGPT-backed account (`planType = plus`)
+> returns `requiresOpenaiAuth: true` and a single weekly bucket; no five-hour bucket is
+> present in `account/rateLimits/read`. The smoke test therefore fails at the five-hour
+> availability assertion. The authentication-state evaluator was corrected in commit
+> `06e5e60`; the remaining blocker is the account/plan rate-limit shape, not code.
 
 ### 7.6 Real activation acceptance test
 
@@ -208,6 +214,12 @@ Expected evidence:
 - [ ] A second attempt in the same guarded window returns `NotEligible` or
       `Suppressed` and issues no additional `turn/start`.
 - [ ] The temporary thread is deleted and no deferred cleanup work remains.
+
+> **Current status (2026-07-13):** Blocked because the connected ChatGPT-backed account
+> (`planType = plus`) does not expose a five-hour bucket at all; `account/rateLimits/read`
+> only returns a weekly bucket. Without a five-hour window the eligibility gate cannot be
+> satisfied and no `turn/start` is issued. The authentication-state misclassification was
+> fixed in commit `06e5e60`.
 
 ### 7.7 Final acceptance matrix
 
