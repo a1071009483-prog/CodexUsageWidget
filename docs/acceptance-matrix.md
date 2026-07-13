@@ -92,9 +92,9 @@ complete. Items marked **automated** are covered by xUnit tests. Items marked
 | 7.2 | Fake-server E2E scenarios and integration coverage for external usage, account switching, sleep/resume, network loss, App Server restarts, stale cached 100%, cleanup failure, and the narrow external-use race | `AppServerEndToEndTests.cs` (fake-server restart/notification/retired generation/stale cached 100%/external usage before activation), `ActivationCoordinatorTests.cs` (external usage, cleanup failure, narrow race, model fallback), `AppServerSupervisorTests.cs` (supervisor restart/recovery), `QuotaMonitorTests.cs` (stale 100% / stale boundary), `AppServerModelBoundaryTests.cs` (thread/turn/delete lifecycle) | ✅ | Test output |
 | 7.3 | Self-contained publish and per-user install/uninstall | `scripts/package.ps1`, `scripts/install.ps1`, `scripts/uninstall.ps1` | ✅ | Build artifacts |
 | 7.4 | Manual install/first-run/startup/pause/upgrade/rollback/uninstall | 🖥️ Manual | ✅ | Executed `scripts/package.ps1`, `install.ps1`, `upgrade.ps1`, `rollback.ps1`, and both `uninstall.ps1` modes; see notes below. |
-| 7.5 | Authenticated read-only smoke test | `ReadOnlyAuthenticatedSmokeTest.cs` | ⏳ | Previously passed against real Codex CLI on Windows. Currently the connected ChatGPT-backed account returns only a weekly bucket (`windowDurationMins = 10080`) with no five-hour bucket, so the test fails at the five-hour availability assertion. The authentication-state misclassification was fixed in commit `06e5e60`. |
+| 7.5 | Authenticated read-only smoke test | `ReadOnlyAuthenticatedSmokeTest.cs` | ⏳ | Harness implemented and previously passed against a real Codex CLI that exposed a five-hour bucket. Re-run on 2026-07-13 still fails because the connected ChatGPT-backed `plus` account returns only a weekly bucket (`windowDurationMins = 10080`) and no five-hour bucket. The authentication-state misclassification was fixed in commit `06e5e60`. |
 | 7.6 | Real activation acceptance test | `RealActivationAcceptanceTest.cs` | ⏳ | Approved, harness ready, but blocked on an account/plan that exposes a fully unused five-hour Codex bucket. No `turn/start` has been issued. |
-| 7.7 | Full automated suite and final acceptance matrix | 🖥️ Manual + automated | ✅ | `dotnet test CodexUsageWidget.sln -c Release` passes with Core 61/61, App 34/34, Infrastructure 161/161; Acceptance 2/2 skipped pending real account five-hour bucket. |
+| 7.7 | Full automated suite and final acceptance matrix | 🖥️ Manual + automated | ✅ | `dotnet test CodexUsageWidget.sln -c Release` passes with Core 61/61, App 34/34, Infrastructure 161/161 and no test excluded; Acceptance 2/2 skipped when `CODEX_ACCEPTANCE_DATA_PATH` is not set. The previously flaky `BackoffResetsOnlyAfterAStableHealthyInterval` supervisor test was stabilized in commit `b0a0b31`. |
 | 7.8 | User documentation | `docs/install.md`, `docs/usage.md`, `docs/security.md`, `docs/troubleshooting.md` | ✅ | This repo |
 
 ---
@@ -183,7 +183,8 @@ Expected evidence (verified on a previous run with a five-hour bucket):
 > present in `account/rateLimits/read`. The smoke test therefore fails at the five-hour
 > availability assertion. The authentication-state evaluator was corrected in commit
 > `06e5e60`; the remaining blocker is the account/plan rate-limit shape, not code. A
-> fresh run with `CODEX_EXECUTABLE` explicitly set produced the same failure.
+> fresh run with `CODEX_EXECUTABLE` explicitly set produced the same failure. The full
+> Release automated suite otherwise passes without exclusions.
 
 ### 7.6 Real activation acceptance test
 
