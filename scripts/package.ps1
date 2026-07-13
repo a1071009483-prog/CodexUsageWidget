@@ -21,9 +21,18 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path (Join-Path (Join-Path (Join-Path $repoRoot 'artifacts') 'publish') $RuntimeIdentifier) $Configuration
 }
 
-$dotnet = Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue
-if ($null -eq $dotnet) {
-    throw 'A .NET 8 SDK is required. Install it and ensure dotnet is on PATH.'
+$dotnet = $null
+$repoDotnet = Join-Path $repoRoot '.dotnet\dotnet.exe'
+if (Test-Path -LiteralPath $repoDotnet -PathType Leaf) {
+    $dotnet = $repoDotnet
+}
+else {
+    $dotnetCommand = Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue
+    if ($null -eq $dotnetCommand) {
+        throw "A .NET 8 SDK is required. Install it or place the repository-local SDK at '$repoDotnet'."
+    }
+
+    $dotnet = $dotnetCommand.Source
 }
 
 $arguments = @(
@@ -42,7 +51,7 @@ if ($NoRestore) {
     $arguments += '--no-restore'
 }
 
-& $dotnet.Source @arguments
+& $dotnet @arguments
 
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
