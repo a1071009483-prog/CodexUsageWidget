@@ -89,7 +89,7 @@ complete. Items marked **automated** are covered by xUnit tests. Items marked
 | # | Requirement | Verification | Status | Evidence |
 |---|-------------|--------------|--------|----------|
 | 7.1 | Automated sensitive-data scans | `SensitiveDataScanTests.cs` | ✅ | Test output |
-| 7.2 | Fake-server E2E scenarios | `AppServerEndToEndTests.cs` | ✅ | Test output |
+| 7.2 | Fake-server E2E scenarios and integration coverage for external usage, account switching, sleep/resume, network loss, App Server restarts, stale cached 100%, cleanup failure, and the narrow external-use race | `AppServerEndToEndTests.cs` (fake-server restart/notification/retired generation), `ActivationCoordinatorTests.cs` (external usage, cleanup failure, narrow race, model fallback), `AppServerSupervisorTests.cs` (supervisor restart/recovery), `QuotaMonitorTests.cs` (stale 100% / stale boundary), `AppServerModelBoundaryTests.cs` (thread/turn/delete lifecycle) | ✅ | Test output |
 | 7.3 | Self-contained publish and per-user install/uninstall | `scripts/package.ps1`, `scripts/install.ps1`, `scripts/uninstall.ps1` | ✅ | Build artifacts |
 | 7.4 | Manual install/first-run/startup/pause/upgrade/rollback/uninstall | 🖥️ Manual | ✅ | Executed `scripts/package.ps1`, `install.ps1`, `upgrade.ps1`, `rollback.ps1`, and both `uninstall.ps1` modes; see notes below. |
 | 7.5 | Authenticated read-only smoke test | `ReadOnlyAuthenticatedSmokeTest.cs` | ✅ | Passed against real Codex CLI on Windows; see notes below. |
