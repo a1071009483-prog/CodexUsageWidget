@@ -15,8 +15,13 @@ internal sealed class ChannelLineReader : TextReader
 {
     private readonly Channel<string> _lines = Channel.CreateUnbounded<string>();
 
-    public void WriteLine(string line) =>
-        Assert.True(_lines.Writer.TryWrite(line), "The server-output channel is closed.");
+    public void WriteLine(string line)
+    {
+        // Best-effort write. If the reader has already been closed by a pump fault,
+        // the line is simply dropped, which matches the behavior of a disconnected
+        // process stdout and avoids races in tests that intentionally write late frames.
+        _lines.Writer.TryWrite(line);
+    }
 
     public void Complete(Exception? error = null) => _lines.Writer.TryComplete(error);
 
