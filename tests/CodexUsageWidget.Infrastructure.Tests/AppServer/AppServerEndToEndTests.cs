@@ -1,8 +1,12 @@
 using System.Globalization;
 using System.Text.Json;
 using CodexUsageWidget.Core.Abstractions;
+using CodexUsageWidget.Core.Activation;
+using CodexUsageWidget.Core.Monitoring;
+using CodexUsageWidget.Core.Quota;
 using CodexUsageWidget.Infrastructure.AppServer;
 using CodexUsageWidget.Infrastructure.AppServer.Protocol;
+using CodexUsageWidget.Infrastructure.Tests.Testing;
 using CodexUsageWidget.Infrastructure.Time;
 using Xunit;
 
@@ -175,6 +179,167 @@ public sealed class AppServerEndToEndTests : IDisposable
         await supervisor.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
     }
 
+    [Fact]
+    public async Task MonitorMarksFiveHourSnapshotStaleAfterThreshold()
+    {
+        long resetsAtFiveHour = new DateTimeOffset(2026, 7, 12, 13, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds();
+        long resetsAtWeekly = new DateTimeOffset(2026, 7, 19, 8, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds();
+
+        var script = new FakeAppServerScriptBuilder()
+            .Handshake(InitializeResult())
+            .ExpectRequest("account/rateLimits/read", RateLimitsResult(0, 0, resetsAtFiveHour, resetsAtWeekly))
+            .HangAfterEof();
+
+        var clock = new ManualClock();
+        var delay = new ManualDelay(clock);
+        AppServerSupervisor supervisor = CreateSupervisor(
+            script,
+            healthyIntervalSeconds: 60,
+            backoffDelay: delay,
+            healthyDelay: delay);
+
+        var sessions = new List<AppServerGenerationSession>();
+        supervisor.SessionPublished += (_, args) => sessions.Add(args.Generation);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        Task startTask = supervisor.StartAsync(cts.Token);
+        await WaitForSessionsAsync(sessions, count: 1, timeout: TimeSpan.FromSeconds(10));
+
+        using var quotaSource = new AppServerQuotaSource(supervisor);
+        await using var monitor = new QuotaMonitor(
+            quotaSource,
+            clock,
+            delay,
+            pollInterval: TimeSpan.FromHours(1),
+            staleThreshold: TimeSpan.FromSeconds(120),
+            notificationDebounce: TimeSpan.Zero);
+
+        await monitor.StartAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        QuotaSnapshot? first = monitor.CurrentSnapshot;
+        Assert.NotNull(first);
+        Assert.True(first.IsFresh);
+        Assert.True(first.FiveHour.IsAvailable);
+        Assert.Equal(0, first.FiveHour.UsedPercent);
+        Assert.Equal(100, first.FiveHour.RemainingPercent);
+
+        var staleTcs = new TaskCompletionSource();
+        monitor.SnapshotChanged += (_, s) =>
+        {
+            if (!s.IsFresh)
+            {
+                staleTcs.TrySetResult();
+            }
+        };
+
+        await delay.AdvanceAsync(TimeSpan.FromSeconds(121));
+        await staleTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        QuotaSnapshot? stale = monitor.CurrentSnapshot;
+        Assert.NotNull(stale);
+        Assert.False(stale.IsFresh);
+        Assert.Equal(0, stale.FiveHour.UsedPercent);
+        Assert.Equal(100, stale.FiveHour.RemainingPercent);
+
+        ActivationEligibilityResult eligibility = ActivationEligibility.Evaluate(
+            stale,
+            automationEnabled: true,
+            activeAttempt: null,
+            clock.UtcNow);
+        Assert.False(eligibility.IsEligible);
+        Assert.Equal("stale", eligibility.Reason);
+
+        await monitor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        await supervisor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        await startTask.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public async Task MonitorDetectsExternalUsageBeforeActivation()
+    {
+        long initialResetsAtFiveHour = new DateTimeOffset(2026, 7, 12, 13, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds();
+        long externalResetsAtFiveHour = new DateTimeOffset(2026, 7, 12, 13, 5, 0, TimeSpan.Zero).ToUnixTimeSeconds();
+        long resetsAtWeekly = new DateTimeOffset(2026, 7, 19, 8, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds();
+
+        var script = new FakeAppServerScriptBuilder()
+            .Handshake(InitializeResult())
+            .ExpectRequest("account/rateLimits/read", RateLimitsResult(0, 0, initialResetsAtFiveHour, resetsAtWeekly))
+            .EmitNotification(
+                "account/rateLimits/updated",
+                new
+                {
+                    rateLimits = new
+                    {
+                        secondary = new
+                        {
+                            usedPercent = 5,
+                            resetsAt = externalResetsAtFiveHour,
+                            windowDurationMins = 300L,
+                        },
+                    },
+                })
+            .ExpectRequest("account/rateLimits/read", RateLimitsResult(0, 5, externalResetsAtFiveHour, resetsAtWeekly))
+            .HangAfterEof();
+
+        var clock = new ManualClock();
+        var delay = new ManualDelay(clock);
+        AppServerSupervisor supervisor = CreateSupervisor(
+            script,
+            healthyIntervalSeconds: 60,
+            backoffDelay: delay,
+            healthyDelay: delay);
+
+        var sessions = new List<AppServerGenerationSession>();
+        supervisor.SessionPublished += (_, args) => sessions.Add(args.Generation);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        Task startTask = supervisor.StartAsync(cts.Token);
+        await WaitForSessionsAsync(sessions, count: 1, timeout: TimeSpan.FromSeconds(10));
+
+        using var quotaSource = new AppServerQuotaSource(supervisor);
+        await using var monitor = new QuotaMonitor(
+            quotaSource,
+            clock,
+            delay,
+            pollInterval: TimeSpan.FromHours(1),
+            staleThreshold: TimeSpan.FromSeconds(120),
+            notificationDebounce: TimeSpan.Zero);
+
+        var updatedTcs = new TaskCompletionSource<QuotaSnapshot>();
+        monitor.SnapshotChanged += (_, s) =>
+        {
+            if (s.FiveHour.UsedPercent > 0)
+            {
+                updatedTcs.TrySetResult(s);
+            }
+        };
+
+        await monitor.StartAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Advance past the monitor's one-second loop tick so the notification read runs.
+        await delay.AdvanceAsync(TimeSpan.FromSeconds(2));
+
+        QuotaSnapshot updated = await updatedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(updated.IsFresh);
+        Assert.True(updated.FiveHour.IsAvailable);
+        Assert.Equal(5, updated.FiveHour.UsedPercent);
+        Assert.Equal(95, updated.FiveHour.RemainingPercent);
+        Assert.NotNull(updated.FiveHour.ResetsAt);
+
+        ActivationEligibilityResult eligibility = ActivationEligibility.Evaluate(
+            updated,
+            automationEnabled: true,
+            activeAttempt: null,
+            clock.UtcNow);
+        Assert.False(eligibility.IsEligible);
+        Assert.Equal("usage-nonzero", eligibility.Reason);
+
+        await monitor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        await supervisor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        await startTask.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
     private static object InitializeResult() => new
     {
         codexHome = "C:\\Codex",
@@ -188,6 +353,29 @@ public sealed class AppServerEndToEndTests : IDisposable
         rateLimits = new
         {
             primary = new { usedPercent },
+        },
+    };
+
+    private static object RateLimitsResult(
+        int primaryUsedPercent,
+        int secondaryUsedPercent,
+        long? secondaryResetsAt,
+        long? primaryResetsAt = null) => new
+    {
+        rateLimits = new
+        {
+            primary = new
+            {
+                usedPercent = primaryUsedPercent,
+                resetsAt = primaryResetsAt,
+                windowDurationMins = 10080L,
+            },
+            secondary = new
+            {
+                usedPercent = secondaryUsedPercent,
+                resetsAt = secondaryResetsAt,
+                windowDurationMins = 300L,
+            },
         },
     };
 
@@ -216,7 +404,9 @@ public sealed class AppServerEndToEndTests : IDisposable
 
     private AppServerSupervisor CreateSupervisor(
         FakeAppServerScriptBuilder script,
-        int healthyIntervalSeconds)
+        int healthyIntervalSeconds,
+        IDelay? backoffDelay = null,
+        IDelay? healthyDelay = null)
     {
         string scriptPath = script.WriteToFile(_tempDir);
         var settings = new AppServerSupervisorSettings(
@@ -224,13 +414,17 @@ public sealed class AppServerEndToEndTests : IDisposable
             TimeSpan.FromMilliseconds(200),
             TimeSpan.FromSeconds(healthyIntervalSeconds));
 
+        backoffDelay ??= new TaskDelay();
+        healthyDelay ??= backoffDelay;
+
         return new AppServerSupervisor(
             new SystemProcessHost(),
             new ProcessStartRequest(FakeServerPath(), [scriptPath]),
             new ClientInformation("codex-usage-widget", "1.0.0", "Codex Usage Widget E2E"),
             TimeSpan.FromSeconds(2),
-            new TaskDelay(),
-            settings);
+            backoffDelay,
+            settings,
+            healthyDelay);
     }
 
     private static string FakeServerPath()
