@@ -142,6 +142,18 @@ public sealed class MainViewModel : ViewModelBase, ITrayCommandSource, IDisposab
         set => StartWithWindows = value;
     }
 
+    /// <summary>
+    /// Informs the view model that authentication is required so the UI reflects
+    /// the blocked state and automatic activation stays disabled.
+    /// </summary>
+    public void SetAuthenticationRequired()
+    {
+        IsAutomationEnabled = false;
+        ConnectionStateText = FormatConnectionState(
+            MonitoringConnectionState.AuthenticatingRequired,
+            scopeLabel: null);
+    }
+
     /// <summary>Informs the view model that the main window visibility changed.</summary>
     public void SetMainWindowVisible(bool visible)
     {

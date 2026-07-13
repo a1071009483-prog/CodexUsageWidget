@@ -101,7 +101,7 @@ public partial class App : System.Windows.Application
 
         IUserNotifier notifier = new WindowsNotificationService(notifyIcon);
         IDelay delay = new TaskDelay();
-        (IQuotaSource quotaSource, IActivationCoordinator activationCoordinator) =
+        (IQuotaSource quotaSource, IActivationCoordinator activationCoordinator, AccountIdentity identity, bool isAuthenticated) =
             await CreateLiveServicesAsync(localAppData, clock, delay, notifier).ConfigureAwait(true);
 
         _monitor = new QuotaMonitor(
@@ -110,7 +110,6 @@ public partial class App : System.Windows.Application
             delay,
             pollInterval: TimeSpan.FromSeconds(30),
             staleThreshold: TimeSpan.FromSeconds(120));
-        AccountIdentity identity = new("design@local.invalid", "design", "global");
         IDispatcher dispatcher = new WpfDispatcher();
 
         _mainWindow = new MainWindow
@@ -135,6 +134,11 @@ public partial class App : System.Windows.Application
         _mainViewModel.IsAutomationEnabled = settings.IsAutomationEnabled;
         _mainViewModel.StartWithWindows = settings.StartWithWindows;
         _mainViewModel.PropertyChanged += OnMainViewModelPropertyChanged;
+
+        if (!isAuthenticated)
+        {
+            _mainViewModel.SetAuthenticationRequired();
+        }
 
         trayIconService.Initialize(_mainViewModel);
         _mainWindow.DataContext = _mainViewModel;
@@ -222,7 +226,7 @@ public partial class App : System.Windows.Application
         _saltStore?.Dispose();
     }
 
-    private async Task<(IQuotaSource QuotaSource, IActivationCoordinator ActivationCoordinator)> CreateLiveServicesAsync(
+    private async Task<(IQuotaSource QuotaSource, IActivationCoordinator ActivationCoordinator, AccountIdentity Identity, bool IsAuthenticated)> CreateLiveServicesAsync(
         string localAppData,
         IClock clock,
         IDelay delay,
@@ -232,10 +236,12 @@ public partial class App : System.Windows.Application
         string appServerWorkingDirectory = System.IO.Path.Combine(dataDirectory, "app-server");
         Directory.CreateDirectory(appServerWorkingDirectory);
 
+        AccountIdentity fallbackIdentity = new("design@local.invalid", "design", "global");
+
         CodexExecutableResolution resolution = CodexExecutableLocator.CreateSystem().Locate();
         if (!resolution.Found)
         {
-            return (new DesignQuotaSource(), new NoOpActivationCoordinator());
+            return (new DesignQuotaSource(), new NoOpActivationCoordinator(), fallbackIdentity, false);
         }
 
         try
@@ -319,12 +325,17 @@ public partial class App : System.Windows.Application
                 _appServerSupervisor.IncompatibleDetected -= onIncompatible;
             }
 
-            return (_appServerQuotaSource, coordinator);
+            var identityProvider = new AppServerAccountIdentityProvider(
+                _appServerSupervisor,
+                new AccountAuthenticationEvaluator());
+            AccountIdentity identity = await identityProvider.GetIdentityAsync(startupCts.Token).ConfigureAwait(true);
+
+            return (_appServerQuotaSource, coordinator, identity, true);
         }
         catch
         {
             await DisposeLiveServicesAsync().ConfigureAwait(false);
-            return (new DesignQuotaSource(), new NoOpActivationCoordinator());
+            return (new DesignQuotaSource(), new NoOpActivationCoordinator(), fallbackIdentity, false);
         }
     }
 
