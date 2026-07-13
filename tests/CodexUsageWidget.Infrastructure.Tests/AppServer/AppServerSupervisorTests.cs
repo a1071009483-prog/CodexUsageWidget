@@ -425,9 +425,7 @@ public sealed class AppServerSupervisorTests
             FakeHostedProcess process = _processes.Dequeue();
             Interlocked.Increment(ref _live);
             UpdateMax(ref _maxLive, Volatile.Read(ref _live));
-            process.Exited.ContinueWith(
-                _ => Interlocked.Decrement(ref _live),
-                TaskScheduler.Default);
+            process.OnDispose = () => Interlocked.Decrement(ref _live);
             return Task.FromResult<IHostedProcess>(process);
         }
 
@@ -485,6 +483,8 @@ public sealed class AppServerSupervisorTests
         public int TerminateCount => Volatile.Read(ref _terminateCount);
         public int DisposeCount => Volatile.Read(ref _disposeCount);
 
+        public Action? OnDispose { get; set; }
+
         public void SimulateExit(int exitCode)
         {
             CompleteStreams();
@@ -541,6 +541,7 @@ public sealed class AppServerSupervisorTests
                 return ValueTask.CompletedTask;
             }
 
+            OnDispose?.Invoke();
             CompleteStreams();
             _exitCompletion.TrySetResult(new ProcessExitResult(0, false));
             return ValueTask.CompletedTask;
