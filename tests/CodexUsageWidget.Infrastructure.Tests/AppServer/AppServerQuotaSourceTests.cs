@@ -104,6 +104,63 @@ public sealed class AppServerQuotaSourceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadAsyncKeepsTopLevelCodexWeeklyWindowDistinctFromOtherLimitFamilies()
+    {
+        var script = new FakeAppServerScriptBuilder()
+            .Handshake(InitializeResult())
+            .ExpectRequest(
+                "account/rateLimits/read",
+                new
+                {
+                    rateLimits = new
+                    {
+                        limitId = "codex",
+                        planType = "plus",
+                        primary = new { usedPercent = 24, resetsAt = 1_787_836_013L, windowDurationMins = 300L },
+                        secondary = new { usedPercent = 4, resetsAt = 1_788_327_847L, windowDurationMins = 10080L },
+                    },
+                    rateLimitsByLimitId = new Dictionary<string, object>
+                    {
+                        ["base_model_inference"] = new
+                        {
+                            limitId = "base_model_inference",
+                            limitName = "gpt-reserve",
+                            planType = "plus",
+                            primary = new { usedPercent = 0, resetsAt = 1_788_424_259L, windowDurationMins = 10080L },
+                        },
+                        ["codex"] = new
+                        {
+                            limitId = "codex",
+                            planType = "plus",
+                            primary = new { usedPercent = 24, resetsAt = 1_787_836_013L, windowDurationMins = 300L },
+                            secondary = new { usedPercent = 4, resetsAt = 1_788_327_847L, windowDurationMins = 10080L },
+                        },
+                    },
+                })
+            .HangAfterEof();
+
+        AppServerSupervisor supervisor = CreateSupervisor(script);
+        var source = new AppServerQuotaSource(supervisor);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Task startTask = supervisor.StartAsync(cts.Token);
+        await WaitForSessionAsync(supervisor, TimeSpan.FromSeconds(5));
+
+        QuotaSourceResult result = await source.ReadAsync(cts.Token);
+        QuotaSnapshot normalized = QuotaNormalizer.Normalize(
+            result.Snapshot!,
+            DateTimeOffset.FromUnixTimeSeconds(1_787_800_000L));
+
+        Assert.True(normalized.Weekly.IsAvailable);
+        Assert.Equal(4, normalized.Weekly.UsedPercent);
+        Assert.Equal(10080L, normalized.Weekly.WindowDurationMinutes);
+
+        await supervisor.StopAsync(CancellationToken.None);
+        await startTask;
+        await supervisor.DisposeAsync();
+        source.Dispose();
+    }
+
+    [Fact]
     public async Task UpdatedEventForwardsSupervisorNotifications()
     {
         var script = new FakeAppServerScriptBuilder()

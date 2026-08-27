@@ -11,16 +11,19 @@ public sealed class CodexExecutableLocator
     private readonly Func<string, string?> _getEnvironmentVariable;
     private readonly Func<string, bool> _fileExists;
     private readonly Func<string, string?> _resolveOnPath;
+    private readonly Func<string?> _resolveDesktopInstallation;
 
     public CodexExecutableLocator(
         Func<string, string?> getEnvironmentVariable,
         Func<string, bool> fileExists,
-        Func<string, string?> resolveOnPath)
+        Func<string, string?> resolveOnPath,
+        Func<string?>? resolveDesktopInstallation = null)
     {
         _getEnvironmentVariable = getEnvironmentVariable
             ?? throw new ArgumentNullException(nameof(getEnvironmentVariable));
         _fileExists = fileExists ?? throw new ArgumentNullException(nameof(fileExists));
         _resolveOnPath = resolveOnPath ?? throw new ArgumentNullException(nameof(resolveOnPath));
+        _resolveDesktopInstallation = resolveDesktopInstallation ?? (() => null);
     }
 
     public CodexExecutableResolution Locate(string? configuredPath = null)
@@ -34,6 +37,12 @@ public sealed class CodexExecutableLocator
         if (IsAccessible(environmentPath))
         {
             return Found(environmentPath!, "environment");
+        }
+
+        string? desktopInstallation = _resolveDesktopInstallation();
+        if (IsAccessible(desktopInstallation))
+        {
+            return Found(desktopInstallation!, "desktop-installation");
         }
 
         string? pathResolution = _resolveOnPath("codex");
@@ -53,7 +62,8 @@ public sealed class CodexExecutableLocator
         new(
             Environment.GetEnvironmentVariable,
             File.Exists,
-            ResolveOnSystemPath);
+            ResolveOnSystemPath,
+            ResolveDesktopInstallation);
 
     private bool IsAccessible(string? candidate) =>
         !string.IsNullOrWhiteSpace(candidate) && _fileExists(candidate);
@@ -111,5 +121,37 @@ public sealed class CodexExecutableLocator
         }
 
         return null;
+    }
+
+    private static string? ResolveDesktopInstallation()
+    {
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localAppData))
+        {
+            return null;
+        }
+
+        string binDirectory = Path.Combine(localAppData, "OpenAI", "Codex", "bin");
+        try
+        {
+            if (!Directory.Exists(binDirectory))
+            {
+                return null;
+            }
+
+            return Directory.EnumerateDirectories(binDirectory)
+                .Select(directory => Path.Combine(directory, "codex.exe"))
+                .Where(File.Exists)
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .FirstOrDefault();
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 }

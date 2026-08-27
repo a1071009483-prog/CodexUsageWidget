@@ -122,6 +122,18 @@ public sealed class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task InitialConnectionFailureDoesNotClaimSuccessfulSynchronizationTime()
+    {
+        _source.EnqueueResult(new QuotaSourceResult(false, null, "cannot start app server"));
+
+        await _viewModel.StartAsync();
+
+        Assert.Equal("连接错误", _viewModel.ConnectionStateText);
+        Assert.Equal("--", _viewModel.FiveHour.LastSyncTimeText);
+        Assert.Equal("--", _viewModel.Weekly.LastSyncTimeText);
+    }
+
+    [Fact]
     public async Task ActivationTriggeredWhenAutomationEnabledAndFreshZero()
     {
         _source.EnqueueSuccess(FiveHourSnapshot(usedPercent: 0));

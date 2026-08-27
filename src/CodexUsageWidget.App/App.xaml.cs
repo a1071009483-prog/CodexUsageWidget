@@ -69,7 +69,7 @@ public partial class App : System.Windows.Application
         {
             try
             {
-                await _singleInstance.SignalExistingInstanceAsync(CancellationToken.None).ConfigureAwait(false);
+                await _singleInstance.SignalExistingInstanceAsync(CancellationToken.None).ConfigureAwait(true);
             }
             catch
             {

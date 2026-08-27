@@ -95,6 +95,29 @@ public sealed class CapabilityAuthenticationAndLocatorTests
     }
 
     [Fact]
+    public void ExecutableLocatorPrefersDesktopUserInstallOverPackagedPathEntry()
+    {
+        const string desktopExecutable = @"C:\Users\alice\AppData\Local\OpenAI\Codex\bin\current\codex.exe";
+        const string packagedExecutable = @"C:\Program Files\WindowsApps\OpenAI.Codex\app\resources\codex.exe";
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            desktopExecutable,
+            packagedExecutable,
+        };
+        var locator = new CodexExecutableLocator(
+            _ => null,
+            existing.Contains,
+            _ => packagedExecutable,
+            () => desktopExecutable);
+
+        CodexExecutableResolution resolution = locator.Locate();
+
+        Assert.True(resolution.Found);
+        Assert.Equal(desktopExecutable, resolution.Command);
+        Assert.Equal("desktop-installation", resolution.Source);
+    }
+
+    [Fact]
     public void ExecutableLocatorReportsUnavailableWithoutGuessing()
     {
         var locator = new CodexExecutableLocator(_ => null, _ => false, _ => null);

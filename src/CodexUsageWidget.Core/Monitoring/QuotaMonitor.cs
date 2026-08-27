@@ -430,7 +430,8 @@ public sealed class QuotaMonitor : IAsyncDisposable
             false,
             state,
             null,
-            null);
+            null,
+            HasSuccessfulSync: false);
     }
 
     private void ScheduleRetry()
@@ -467,7 +468,8 @@ public sealed class QuotaMonitor : IAsyncDisposable
         }
 
         DateTimeOffset now = _clock.UtcNow;
-        bool isFresh = now - current.SyncedAt < _staleThreshold;
+        bool isFresh = current.ConnectionState == MonitoringConnectionState.Connected
+            && now - current.SyncedAt < _staleThreshold;
 
         QuotaSnapshot updated = current with
         {

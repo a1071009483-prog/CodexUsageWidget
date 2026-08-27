@@ -116,6 +116,16 @@ public sealed class QuotaCardViewModelTests
         Assert.Equal(SyncTime.ToLocalTime().ToString("HH:mm:ss", System.Globalization.CultureInfo.CurrentCulture), vm.LastSyncTimeText);
     }
 
+    [Fact]
+    public void NeverSuccessfullySynchronizedCardShowsNoSyncTime()
+    {
+        QuotaCardViewModel vm = Create(QuotaBucket.FiveHour);
+
+        vm.Update(Bucket(QuotaBucket.FiveHour, 0, 0, false), false, null, null);
+
+        Assert.Equal("--", vm.LastSyncTimeText);
+    }
+
     private static QuotaCardViewModel Create(QuotaBucket bucket) => new(bucket, new SynchronousDispatcher());
 
     private static QuotaBucketSnapshot Bucket(

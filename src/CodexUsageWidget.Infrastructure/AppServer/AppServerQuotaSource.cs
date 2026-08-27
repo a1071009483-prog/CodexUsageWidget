@@ -79,16 +79,25 @@ public sealed class AppServerQuotaSource : IQuotaSource, IDisposable
             buckets["secondary"] = ToRawWindow(limits.Secondary);
         }
 
-        if (response.RateLimitsByLimitId is not null)
+        if (limits.Secondary is null && response.RateLimitsByLimitId is not null)
         {
             foreach ((string? key, RateLimitSnapshot? value) in response.RateLimitsByLimitId)
             {
-                if (string.IsNullOrWhiteSpace(key) || value?.Primary is null)
+                if (string.IsNullOrWhiteSpace(key) || value is null)
                 {
                     continue;
                 }
 
-                buckets[key] = ToRawWindow(value.Primary);
+                if (!string.Equals(key, limits.LimitId, StringComparison.Ordinal)
+                    && value.Primary is not null)
+                {
+                    buckets[key] = ToRawWindow(value.Primary);
+                }
+
+                if (value.Secondary is not null)
+                {
+                    buckets[$"{key}:secondary"] = ToRawWindow(value.Secondary);
+                }
             }
         }
 

@@ -209,8 +209,9 @@ public sealed class MainViewModel : ViewModelBase, ITrayCommandSource, IDisposab
         }
 
         TimeSpan? countdown = snapshot.Countdown;
-        FiveHour.Update(snapshot.FiveHour, snapshot.IsFresh, snapshot.SyncedAt, countdown);
-        Weekly.Update(snapshot.Weekly, snapshot.IsFresh, snapshot.SyncedAt, snapshot.WeeklyCountdown);
+        DateTimeOffset? lastSuccessfulSync = snapshot.HasSuccessfulSync ? snapshot.SyncedAt : null;
+        FiveHour.Update(snapshot.FiveHour, snapshot.IsFresh, lastSuccessfulSync, countdown);
+        Weekly.Update(snapshot.Weekly, snapshot.IsFresh, lastSuccessfulSync, snapshot.WeeklyCountdown);
         ConnectionStateText = FormatConnectionState(snapshot.ConnectionState, snapshot.ScopeLabel);
 
         if (ShouldActivate(snapshot))

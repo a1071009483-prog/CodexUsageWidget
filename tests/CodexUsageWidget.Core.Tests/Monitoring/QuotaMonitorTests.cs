@@ -67,7 +67,7 @@ public sealed class QuotaMonitorTests : IAsyncLifetime, IDisposable
             _source.EnqueueSuccess(FiveHourSnapshot(20));
             _source.RaiseUpdated();
 
-            await WaitUntilAsync(() => _source.ReadCount == 2);
+            await WaitUntilAsync(() => changes.Count == 2);
 
             Assert.Equal(2, _source.ReadCount);
             Assert.Equal(2, changes.Count);
@@ -130,7 +130,11 @@ public sealed class QuotaMonitorTests : IAsyncLifetime, IDisposable
     public async Task StaleMarkedExactlyAtOneHundredTwentySeconds()
     {
         _source.EnqueueSuccess(FiveHourSnapshot(10));
-        QuotaMonitor monitor = new(_source, _clock, _delay);
+        QuotaMonitor monitor = new(
+            _source,
+            _clock,
+            _delay,
+            pollInterval: TimeSpan.FromMinutes(5));
 
         await monitor.StartAsync();
 
@@ -175,6 +179,35 @@ public sealed class QuotaMonitorTests : IAsyncLifetime, IDisposable
             readsAfterStartup = _source.ReadCount;
             await AdvanceToAsync(Start + TimeSpan.FromSeconds(63));
             Assert.Equal(readsAfterStartup + 1, _source.ReadCount);
+        }
+        finally
+        {
+            await monitor.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ConnectionFailureRemainsStaleDuringLocalCountdownTicks()
+    {
+        _source.EnqueueSuccess(FiveHourSnapshot(10, ResetsAt.ToUnixTimeSeconds()));
+        _source.EnqueueResult(new QuotaSourceResult(false, null, "transport unavailable"));
+        QuotaMonitor monitor = new(_source, _clock, _delay);
+
+        await monitor.StartAsync();
+
+        try
+        {
+            await AdvanceToAsync(Start + TimeSpan.FromSeconds(60));
+            Assert.Equal(MonitoringConnectionState.Error, monitor.CurrentSnapshot!.ConnectionState);
+            Assert.False(monitor.CurrentSnapshot.IsFresh);
+
+            MethodInfo tick = typeof(QuotaMonitor).GetMethod(
+                "RepublishCountdown",
+                BindingFlags.Instance | BindingFlags.NonPublic)!;
+            tick.Invoke(monitor, null);
+
+            Assert.Equal(MonitoringConnectionState.Error, monitor.CurrentSnapshot.ConnectionState);
+            Assert.False(monitor.CurrentSnapshot.IsFresh);
         }
         finally
         {
