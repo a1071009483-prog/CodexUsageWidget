@@ -48,6 +48,7 @@ public sealed class AppServerModelBoundaryTests
         Assert.Equal("thread-1", turnParams.GetProperty("threadId").GetString());
         Assert.Equal("OK", turnParams.GetProperty("input")[0].GetProperty("text").GetString());
         Assert.Equal("text", turnParams.GetProperty("input")[0].GetProperty("type").GetString());
+        Assert.Equal(0, turnParams.GetProperty("input")[0].GetProperty("text_elements").GetArrayLength());
         Assert.Equal("low", turnParams.GetProperty("effort").GetString());
         Assert.Equal("never", turnParams.GetProperty("approvalPolicy").GetString());
         Assert.Equal("none", turnParams.GetProperty("summary").GetString());

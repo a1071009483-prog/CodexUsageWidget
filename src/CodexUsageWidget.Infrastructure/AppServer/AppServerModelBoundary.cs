@@ -56,7 +56,9 @@ public sealed class AppServerModelBoundary : IModelBoundary
                     ThreadId = thread.Thread.Id,
                     Input = new[]
                     {
-                        new TextUserInput("text", request.Prompt),
+                        // The current App Server schema accepts an array (or omission) here,
+                        // but rejects an explicit JSON null.
+                        new TextUserInput("text", request.Prompt, Array.Empty<object>()),
                     },
                     ApprovalPolicy = ApprovalPolicyNever,
                     Effort = LowestReasoningEffort,
