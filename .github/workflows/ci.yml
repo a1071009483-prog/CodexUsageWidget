@@ -14,39 +14,124 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect change scope
+        id: scope
+        shell: pwsh
+        run: |
+          $head = '${{ github.sha }}'
+          if ('${{ github.event_name }}' -eq 'pull_request') {
+            $base = '${{ github.event.pull_request.base.sha }}'
+          }
+          else {
+            $base = '${{ github.event.before }}'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($base) -or $base -match '^0+$') {
+            $changedFiles = @(git diff-tree --root --no-commit-id --name-only -r $head)
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not determine files changed in $head."
+            }
+          }
+          else {
+            $changedFiles = @(git diff --name-only $base $head)
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not determine files changed between $base and $head."
+            }
+          }
+
+          $docsOnly = $changedFiles.Count -gt 0
+          foreach ($file in $changedFiles) {
+            if ($file -notmatch '^(README\.md|LICENSE|docs/.*)$') {
+              $docsOnly = $false
+              break
+            }
+          }
+
+          $full = -not $docsOnly
+          "full=$($full.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+          Write-Host "Changed files:"
+          $changedFiles | ForEach-Object { Write-Host "  $_" }
+          Write-Host "Full Windows test/package required: $full"
+
+      - name: Lightweight repository checks
+        shell: pwsh
+        run: |
+          $head = '${{ github.sha }}'
+          if ('${{ github.event_name }}' -eq 'pull_request') {
+            $base = '${{ github.event.pull_request.base.sha }}'
+          }
+          else {
+            $base = '${{ github.event.before }}'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($base) -or $base -match '^0+$') {
+            git show --check --format= $head
+          }
+          else {
+            git diff --check $base $head
+          }
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+          if (-not (Test-Path -LiteralPath LICENSE -PathType Leaf)) {
+            throw 'Root LICENSE file is required.'
+          }
+
+          $readme = Get-Content -LiteralPath README.md -Raw
+          if ($readme -notmatch '\[MIT License\]\(LICENSE\)') {
+            throw 'README must reference the root MIT License.'
+          }
 
       - uses: actions/setup-dotnet@v4
+        if: steps.scope.outputs.full == 'true'
         with:
           global-json-file: global.json
 
       - name: Restore
+        if: steps.scope.outputs.full == 'true'
         shell: pwsh
         run: dotnet restore CodexUsageWidget.sln
 
       - name: Core tests
+        if: steps.scope.outputs.full == 'true'
         timeout-minutes: 3
         shell: pwsh
         run: dotnet test tests/CodexUsageWidget.Core.Tests/CodexUsageWidget.Core.Tests.csproj -c Release --no-restore --blame-hang --blame-hang-timeout 60s
 
       - name: Infrastructure tests
+        if: steps.scope.outputs.full == 'true'
         timeout-minutes: 5
         shell: pwsh
         run: dotnet test tests/CodexUsageWidget.Infrastructure.Tests/CodexUsageWidget.Infrastructure.Tests.csproj -c Release --no-restore --blame-hang --blame-hang-timeout 60s
 
       - name: App tests
+        if: steps.scope.outputs.full == 'true'
         timeout-minutes: 3
         shell: pwsh
         run: dotnet test tests/CodexUsageWidget.App.Tests/CodexUsageWidget.App.Tests.csproj -c Release --no-restore --blame-hang --blame-hang-timeout 60s
 
       - name: Acceptance tests
+        if: steps.scope.outputs.full == 'true'
         timeout-minutes: 3
         shell: pwsh
         run: dotnet test tests/CodexUsageWidget.AcceptanceTests/CodexUsageWidget.AcceptanceTests.csproj -c Release --no-restore --blame-hang --blame-hang-timeout 60s
 
       - name: Package portable artifact
+        if: steps.scope.outputs.full == 'true'
         shell: pwsh
         run: .\scripts\package.ps1 -Configuration Release -RuntimeIdentifier win-x64 -Version 0.0.0-ci -Clean
 
       - name: Verify portable artifact
+        if: steps.scope.outputs.full == 'true'
         shell: pwsh
         run: .\scripts\verify-release.ps1 -Version 0.0.0-ci -RuntimeIdentifier win-x64
+
+      - name: Docs-only verification complete
+        if: steps.scope.outputs.full != 'true'
+        shell: pwsh
+        run: Write-Host 'Documentation-only change; full Windows test/package steps were not required.'
