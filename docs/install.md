@@ -1,129 +1,95 @@
 # Installing Codex Usage Widget
 
-The Codex Usage Widget is a Windows-only .NET 8 WPF application. Normal use does
-not require administrator rights.
+The Codex Usage Widget is a Windows-only application. Normal use does not
+require administrator rights, a .NET SDK, or any build tools.
 
-## Prerequisites
+## Normal installation
 
-- Windows 10 version 19041 (20H2) or later, or Windows 11.
-- [.NET 8 Windows Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
-  if you are not using the self-contained build.
-- The [Codex CLI](https://github.com/openai/codex) installed and available on
-  `PATH`. The widget launches `codex app-server` and relies on the CLI for
-  authentication and App Server protocol support.
+This is the path for everyone who just wants to use the widget:
+
+1. Install the [Codex CLI](https://github.com/openai/codex) so that `codex` is
+   available on your `PATH`.
+2. Run `codex login` once and sign in with your ChatGPT account.
+   (API-key-only accounts are not supported.)
+3. Open the
+   [GitHub Releases](https://github.com/a1071009483-prog/CodexUsageWidget/releases)
+   page and download the latest `CodexUsageWidget-Setup-<version>.exe`.
+4. Double-click the installer.
+
+The installer:
+
+- installs the application into
+  `%LOCALAPPDATA%\Programs\CodexUsageWidget\`,
+- creates a Start Menu shortcut and an uninstall entry,
+- can launch the widget immediately after installation (enabled by default),
+- never asks for administrator rights.
+
+Supported systems: Windows 10 version 19041 (20H2) or later, or Windows 11,
+x64. The release payload is self-contained; Windows never asks you to install a
+.NET runtime.
+
+## Portable ZIP
+
+Advanced users can use `CodexUsageWidget-<version>-win-x64.zip` from the same
+release instead:
+
+1. Extract the ZIP to any folder you own (for example
+   `%LOCALAPPDATA%\Programs\CodexUsageWidget-portable\`).
+2. Double-click `CodexUsageWidget.exe`.
+
+The portable build is the same application payload as the installer. It shares
+the same per-user data directory, so quota safety state and settings are
+consistent whichever variant you start.
+
+`SHA256SUMS.txt` on the release page lets you verify downloads:
+
+```powershell
+Get-FileHash .\CodexUsageWidget-Setup-<version>.exe -Algorithm SHA256
+```
 
 ## Build from source
 
-Open a PowerShell prompt in the repository root and run:
+Only contributors need this path. Normal users should use the installer above.
+
+Prerequisites:
+
+- Windows 10 19041+ / Windows 11, x64.
+- The exact .NET SDK version pinned in `global.json`.
+- (For the installer) Inno Setup 6.
 
 ```powershell
-.\scripts\package.ps1 -Configuration Release
+# Run all automated tests
+.\scripts\build.ps1 -Configuration Release
+
+# Produce the versioned self-contained payload and portable ZIP
+.\scripts\package.ps1 -Configuration Release -RuntimeIdentifier win-x64 -Version 0.0.0-dev -Clean
+
+# Build the per-user installer from the packaged payload
+.\scripts\build-installer.ps1 -Version 0.0.0-dev -SourceDirectory .\artifacts\publish\win-x64\Release
+
+# Verify the release output (version, archive contents, checksums, signatures)
+.\scripts\verify-release.ps1 -Version 0.0.0-dev -RuntimeIdentifier win-x64 -RequireInstaller
 ```
 
-This produces a self-contained single-file build in:
+The legacy developer scripts `install.ps1`, `upgrade.ps1`, `rollback.ps1`, and
+`uninstall.ps1` remain available for source-build workflows. Note that
+`install.ps1` copies the payload into `%LOCALAPPDATA%\CodexUsageWidget\`,
+while the Inno installer uses `%LOCALAPPDATA%\Programs\CodexUsageWidget\`;
+pick one installation variant at a time so the single-instance behavior stays
+predictable.
 
-```
-artifacts\publish\win-x64\Release\
-```
+## Uninstall and retained local state
 
-## Install per user
+Uninstall from **Settings → Apps** or the Start Menu entry, or run
+`scripts\uninstall.ps1` for source-build installations.
 
-From the repository root, run:
+Uninstalling removes the program files, shortcuts, and the uninstall entry. It
+deliberately **keeps** `%LOCALAPPDATA%\CodexUsageWidget\`, which contains your
+settings, redacted audit history, and the activation safety locks that
+guarantee at-most-once activation per five-hour window. Reinstalling later
+reuses this state safely.
 
-```powershell
-.\scripts\install.ps1
-```
-
-The installer copies the published files to:
-
-```
-%LOCALAPPDATA%\CodexUsageWidget\
-```
-
-and registers the application to start with your Windows session. No
-administrator rights are required.
-
-To also create a Start-menu shortcut, run:
-
-```powershell
-.\scripts\install.ps1 -CreateStartMenuShortcut
-```
-
-## First run
-
-After installation, sign in to the Codex CLI with a ChatGPT-backed account:
-
-```powershell
-codex login
-```
-
-Then start the widget from the Start menu or by running:
-
-```powershell
-%LOCALAPPDATA%\CodexUsageWidget\CodexUsageWidget.exe
-```
-
-The widget appears as a floating window and remains available in the system tray
-when the window is hidden.
-
-## Uninstall
-
-Run:
-
-```powershell
-.\scripts\uninstall.ps1
-```
-
-By default this removes the startup entry and the installation directory but
-keeps local state under `%LOCALAPPDATA%\CodexUsageWidget\` in case you want to
-retain audit history. To remove local data as well, run:
-
-```powershell
-.\scripts\uninstall.ps1 -RemoveLocalData
-```
-
-## Upgrade and rollback
-
-### Upgrade
-
-Build the new version and run the upgrade script:
-
-```powershell
-.\scripts\package.ps1 -Configuration Release
-.\scripts\upgrade.ps1
-```
-
-`upgrade.ps1` will:
-
-1. Stop any running widget instance.
-2. Create a timestamped backup of the current installation under
-   `%LOCALAPPDATA%\CodexUsageWidget-backups\`.
-3. Copy the new build into `%LOCALAPPDATA%\CodexUsageWidget\`.
-4. Preserve the **Start with Windows** setting.
-5. Remove older backups, keeping the most recent three.
-
-On the next launch the widget validates and migrates the local SQLite database.
-If migration cannot be performed safely, automatic triggering is disabled and a
-safety error is shown.
-
-### Rollback
-
-If the new build fails, restore the most recent backup:
-
-```powershell
-.\scripts\rollback.ps1
-```
-
-To restore a specific backup, pass its directory:
-
-```powershell
-.\scripts\rollback.ps1 -BackupDirectory "$env:LOCALAPPDATA\CodexUsageWidget-backups\20260712-120000"
-```
-
-`rollback.ps1` stops the running instance, replaces the current installation
-with the chosen backup, and re-registers startup if requested.
-
-Local state under `%LOCALAPPDATA%\CodexUsageWidget\` is not removed by either
-script. Removing local data while an active five-hour suppression guard is still
-live could erase the at-most-once lock, so use `-RemoveLocalData` with
-`uninstall.ps1` only when you are sure no recent activation is in progress.
+Removing that directory while a five-hour suppression guard is live can erase
+the at-most-once lock. If you fully understand that consequence, source-build
+users can run `scripts\uninstall.ps1 -RemoveLocalData`; installer users can
+delete `%LOCALAPPDATA%\CodexUsageWidget\` manually after uninstalling.
