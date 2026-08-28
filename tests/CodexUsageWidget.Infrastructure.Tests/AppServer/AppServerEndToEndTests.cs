@@ -118,8 +118,12 @@ public sealed class AppServerEndToEndTests : IDisposable
     [Fact]
     public async Task SupervisorForwardsRateLimitNotification()
     {
+        // The fake server emits the notification only after a post-publish request:
+        // notification forwarders are attached before SessionPublished, so anything
+        // emitted after the session is published is guaranteed to be observed.
         var script = new FakeAppServerScriptBuilder()
             .Handshake(InitializeResult())
+            .ExpectRequest("account/rateLimits/read", RateLimitsResult(usedPercent: 1))
             .EmitNotification(
                 "account/rateLimits/updated",
                 new { rateLimits = new { primary = new { usedPercent = 42 } } })
@@ -130,12 +134,21 @@ public sealed class AppServerEndToEndTests : IDisposable
         var notifications = new List<RateLimitSnapshot>();
         supervisor.RateLimitsUpdated += (_, args) => notifications.Add(args.RateLimits);
 
+        var sessions = new List<AppServerGenerationSession>();
+        supervisor.SessionPublished += (_, args) => sessions.Add(args.Generation);
+
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         Task startTask = supervisor.StartAsync(cts.Token);
 
         try
         {
-            await WaitForNotificationsAsync(notifications, count: 1, timeout: TimeSpan.FromSeconds(5));
+            await WaitForSessionsAsync(sessions, count: 1, timeout: TimeSpan.FromSeconds(10));
+
+            await sessions[0].Session.Gateway
+                .ReadRateLimitsAsync(CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+
+            await WaitForNotificationsAsync(notifications, count: 1, timeout: TimeSpan.FromSeconds(10));
 
             Assert.Single(notifications);
             Assert.Equal(42, notifications[0].Primary!.UsedPercent);
