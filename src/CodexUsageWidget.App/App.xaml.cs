@@ -256,7 +256,7 @@ public partial class App : System.Windows.Application
 
             ClientInformation clientInformation = new(
                 "codex-usage-widget",
-                "1.0.0",
+                ApplicationVersion.Current,
                 "Codex Usage Widget");
             ProcessStartRequest startRequest = new(
                 resolution.Command!,
