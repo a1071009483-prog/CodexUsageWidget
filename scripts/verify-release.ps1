@@ -66,20 +66,20 @@ try {
     Assert-Condition ($reportedVersion -eq $Version) "--version reported '$reportedVersion', expected '$Version'"
 
     # No source, test, intermediate, or debug artifacts may ship in the archive.
-    $payloadFiles = Get-ChildItem -LiteralPath $extractRoot -Recurse -File |
-        Where-Object { $_.Name -notin @('version.stdout.txt', 'version.stderr.txt') }
-    $forbidden = $payloadFiles | Where-Object {
+    $payloadFiles = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File |
+        Where-Object { $_.Name -notin @('version.stdout.txt', 'version.stderr.txt') })
+    $forbidden = @($payloadFiles | Where-Object {
         $normalized = $_.FullName.Replace('/', '\')
         $_.Extension -in @('.cs', '.csproj', '.sln', '.pdb') -or
         $normalized -match '\\obj\\' -or
         $normalized -match '\\tests\\'
     }
-    Assert-Condition ($null -eq $forbidden -or $forbidden.Count -eq 0) (
+    Assert-Condition ($forbidden.Count -eq 0) (
         "forbidden files in archive: " + (($forbidden | Select-Object -First 5 -ExpandProperty Name) -join ', '))
 
     # Every checksum line must match the produced artifact.
-    $checksumLines = Get-Content -LiteralPath $checksumPath |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $checksumLines = @(Get-Content -LiteralPath $checksumPath |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     Assert-Condition ($checksumLines.Count -ge 1) "SHA256SUMS.txt contains no entries"
 
     foreach ($line in $checksumLines) {
