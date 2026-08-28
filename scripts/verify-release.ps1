@@ -73,7 +73,7 @@ try {
         $_.Extension -in @('.cs', '.csproj', '.sln', '.pdb') -or
         $normalized -match '\\obj\\' -or
         $normalized -match '\\tests\\'
-    }
+    })
     Assert-Condition ($forbidden.Count -eq 0) (
         "forbidden files in archive: " + (($forbidden | Select-Object -First 5 -ExpandProperty Name) -join ', '))
 
