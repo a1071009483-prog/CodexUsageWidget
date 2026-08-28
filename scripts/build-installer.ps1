@@ -19,6 +19,9 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $issPath = Join-Path $repoRoot 'installer\CodexUsageWidget.iss'
 $releaseRoot = Join-Path $repoRoot 'artifacts\release'
 
+# ISCC resolves relative paths against the .iss file location, not the caller.
+$SourceDirectory = (Resolve-Path -LiteralPath $SourceDirectory).Path
+
 $sourceExe = Join-Path $SourceDirectory 'CodexUsageWidget.exe'
 if (-not (Test-Path -LiteralPath $sourceExe -PathType Leaf)) {
     throw "Signed application payload not found: $sourceExe. Run scripts/package.ps1 first."
