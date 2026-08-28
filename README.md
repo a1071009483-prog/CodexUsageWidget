@@ -4,9 +4,11 @@ A resident Windows floating widget that shows your Codex five-hour and weekly
 quota in real time and can automatically start a fully unused five-hour window
 with exactly one guarded minimal turn.
 
-> **Supported:** Windows 10 version 19041 (20H2) or later, or Windows 11 (x64).  
+> **Supported:** Windows 10 version 19041 (20H2) or later, or Windows 11 (x64).
+>
 > **Authentication:** ChatGPT-backed Codex CLI login (`codex login`).
-> API-key-only accounts are not supported.  
+> API-key-only accounts are not supported.
+>
 > **No .NET SDK or administrator rights required** when installing from a
 > release installer.
 
