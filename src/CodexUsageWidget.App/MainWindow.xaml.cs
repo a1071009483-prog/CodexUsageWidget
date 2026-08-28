@@ -42,6 +42,7 @@ public partial class MainWindow : Window
             WindowPlacement? placement = await PlacementService.LoadPlacementAsync().ConfigureAwait(true);
             if (placement is not null)
             {
+                double requiredContentHeight = Math.Max(MinHeight, ActualHeight);
                 SizeToContent = SizeToContent.Manual;
 
                 WindowPlacementScreen workArea = new(
@@ -54,11 +55,16 @@ public partial class MainWindow : Window
                     .Select(s => new WindowPlacementScreen(s.Bounds.Left, s.Bounds.Top, s.Bounds.Width, s.Bounds.Height))
                     .ToArray();
 
-                WindowPlacement clamped = PlacementService.ClampPlacement(placement, screens, workArea);
+                WindowPlacement contentSafePlacement = placement with
+                {
+                    Height = Math.Max(placement.Height, requiredContentHeight),
+                };
+                WindowPlacement clamped = PlacementService.ClampPlacement(contentSafePlacement, screens, workArea);
 
                 Left = clamped.Left;
                 Top = clamped.Top;
                 Width = clamped.Width;
+                MinHeight = Math.Min(requiredContentHeight, clamped.Height);
                 Height = clamped.Height;
             }
         }

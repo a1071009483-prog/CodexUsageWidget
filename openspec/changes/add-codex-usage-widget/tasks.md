@@ -44,6 +44,7 @@
 - [x] 5.8 Delete successful temporary tasks, enqueue delete-only cleanup when deletion itself fails, persist redacted pre/post audit data, and emit one deduplicated terminal notification.
 - [x] 5.9 Add concurrency and crash-injection tests at every boundary before and after lock persistence, request transmission, turn acceptance, verification, and cleanup to prove at most one actual generation per scoped window.
 - [x] 5.10 Add model-selection tests for new lightweight versions, missing lightweight families, default fallback, multiple/absent defaults, explicit pre-generation rejection, and ambiguous failure without retry.
+- [x] 5.11 Distinguish rolling full-window `resetsAt` placeholders from stable active timers across debounced read-only confirmations, atomically reuse unexpired local guards across epoch boundaries, require positive final-preflight movement and stable post-generation reset evidence, and add regression tests for every fail-closed boundary.
 
 ## 6. Floating Widget and Tray Experience
 
@@ -56,6 +57,7 @@
 - [x] 6.7 Persist and restore widget position and size safely across restarts, removed monitors, work-area changes, and per-monitor DPI changes.
 - [x] 6.8 Implement per-user Windows startup registration, default startup/automatic-trigger settings, preference persistence, and safety overrides that keep activation disabled when state is invalid.
 - [x] 6.9 Add WPF/view-model tests for quota rendering, active-but-rounded 100% state, stale data, color boundaries, tray commands, notifications, single-instance signaling, startup preferences, and multi-monitor placement logic.
+- [x] 6.10 Add a `检查并触发` widget action that performs one non-reentrant guarded activation evaluation independently of the automatic-trigger preference, reports concise progress/outcome state, and add regression tests proving ineligible manual checks create no turn and never alter the persisted automatic setting.
 
 ## 7. Packaging, Security, and End-to-End Verification
 

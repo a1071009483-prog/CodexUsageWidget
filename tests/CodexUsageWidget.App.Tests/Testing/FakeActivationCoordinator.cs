@@ -8,14 +8,18 @@ internal sealed class FakeActivationCoordinator : IActivationCoordinator
 {
     public List<ActivationCall> Calls { get; } = new();
 
+    public Func<ActivationCall, CancellationToken, Task<ActivationResult>>? OnTryActivate { get; set; }
+
     public Task<ActivationResult> TryActivateAsync(
         AccountIdentity identity,
         QuotaSnapshot snapshot,
         ActivationRequest request,
         CancellationToken cancellationToken = default)
     {
-        Calls.Add(new ActivationCall(identity, snapshot, request));
-        return Task.FromResult(ActivationResult.NotEligible("test"));
+        var call = new ActivationCall(identity, snapshot, request);
+        Calls.Add(call);
+        return OnTryActivate?.Invoke(call, cancellationToken)
+            ?? Task.FromResult(ActivationResult.NotEligible("test"));
     }
 }
 

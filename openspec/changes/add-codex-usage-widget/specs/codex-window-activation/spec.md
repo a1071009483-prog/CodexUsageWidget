@@ -19,6 +19,14 @@ The system SHALL consider automatic activation eligible only when automatic acti
 - **WHEN** the bucket reports `usedPercent = 0` but a verified future `resetsAt` or durable success record proves that its five-hour timer is already active
 - **THEN** the system treats the activation goal as satisfied and sends no generation
 
+#### Scenario: Full-window reset placeholder rolls forward
+- **WHEN** two independent exact-zero observations each report a reset approximately five hours from that observation and the reset advances with the elapsed observation time
+- **THEN** the system treats that reset as an unused-window placeholder rather than proof of an active timer and continues the guarded confirmation flow
+
+#### Scenario: Future reset remains stable
+- **WHEN** two independent exact-zero observations report the same future reset instant
+- **THEN** the system treats the timer as verified active and sends no generation
+
 ### Requirement: Consecutive confirmation and final read-only gate
 The system MUST obtain two consecutive, independently fetched, fresh confirmations of `usedPercent = 0` for the same account, workspace, and five-hour window, with no intervening ineligible observation. After acquiring the durable activation lock, it SHALL perform one final read-only quota check immediately before sending the generation request and revalidate the same eligibility conditions.
 
@@ -29,6 +37,10 @@ The system MUST obtain two consecutive, independently fetched, fresh confirmatio
 #### Scenario: Final gate no longer confirms eligibility
 - **WHEN** the final read-only pre-send check is stale, unknown, targets a different window, or no longer reports exact `usedPercent = 0`
 - **THEN** the system cancels the automatic send and does not issue a generation request
+
+#### Scenario: Final rolling evidence cannot be proven
+- **WHEN** the candidate was admitted from a rolling placeholder but the final observation does not show positive reset movement at the server timestamp resolution
+- **THEN** the system fails closed, treats the window as externally satisfied, and sends no generation
 
 ### Requirement: Durable scoped write-ahead deduplication
 Before creating a temporary activation task or sending a generation, the system SHALL atomically persist and durably flush a write-ahead lock keyed by account identity, workspace identity, and five-hour window identity. It MUST treat an existing lock for that complete key as authoritative and block another activation attempt. The system SHALL use an authoritative server window/reset identity when one is available; otherwise it MUST create a durable local eligibility epoch that survives restart and remains active for at least the suppression period.
@@ -44,6 +56,10 @@ Before creating a temporary activation task or sending a generation, the system 
 #### Scenario: Server provides no stable unused-window identity
 - **WHEN** an eligible completely unused bucket has no authoritative server window or reset identity
 - **THEN** the system creates one durable local eligibility epoch and reuses it across restart until its suppression period ends
+
+#### Scenario: Local epoch boundary changes during suppression
+- **WHEN** a later rolling-placeholder candidate falls into a different computed local epoch while an earlier local guard for the same account and workspace remains unexpired
+- **THEN** atomic lock acquisition reuses the unexpired guard and blocks another generation
 
 ### Requirement: Crash-safe at-most-once generation
 The system MUST recover persistent locks before evaluating activation after any process crash or restart and SHALL ensure that no account, workspace, and five-hour window key can cause more than one actual generation. Safety MUST take precedence over retrying an activation that might not have occurred.
@@ -104,6 +120,10 @@ The system SHALL declare activation successful when a fresh post-generation five
 - **WHEN** a fresh post-generation bucket has an updated future `resetsAt` approximately five hours away while the rounded display remains 100% remaining
 - **THEN** the system records activation success without requiring a visible percentage change
 
+#### Scenario: Pre-generation state used a rolling placeholder
+- **WHEN** the pre-generation observations proved a rolling placeholder
+- **THEN** activation succeeds only after two post-generation read-only observations report the same changed future reset; a placeholder that continues rolling remains unverified
+
 #### Scenario: Reset transition is not proven
 - **WHEN** verification ends without a fresh bucket that proves the required future `resetsAt` transition
 - **THEN** the system treats the outcome as unknown and does not retry generation in that scoped window
@@ -141,8 +161,16 @@ If deletion of a temporary activation task fails, the system SHALL only enqueue 
 - **THEN** the system queues deferred cleanup, leaves activation successful, and performs no additional generation for the scoped window
 
 ### Requirement: No eligibility bypass
-The system MUST NOT expose a force-trigger control, command, API, diagnostic path, or setting that bypasses the fresh exact-zero five-hour eligibility condition. Every user-invoked activation check SHALL pass through the same eligibility, confirmation, locking, and final read-only gates as automatic evaluation.
+The system MUST NOT expose a force-trigger control, command, API, diagnostic path, or setting that bypasses the fresh exact-zero five-hour eligibility condition. It MAY expose a user-invoked safe activation check while automatic triggering is paused, but that request SHALL pass through the same fresh exact-zero eligibility, consecutive confirmation, durable locking, and final read-only gates as automatic evaluation. A manual request authorizes only that one guarded evaluation and MUST NOT change the persisted automatic-trigger preference.
 
 #### Scenario: User requests activation while the five-hour bucket is not completely unused
 - **WHEN** any user-accessible trigger path is invoked and the fresh five-hour bucket does not report exact `usedPercent = 0`
 - **THEN** the system sends no activation generation and offers no override that can force it
+
+#### Scenario: User safely checks while automatic triggering is paused
+- **WHEN** automatic triggering is paused and the user invokes the safe manual check
+- **THEN** the system performs one guarded evaluation using the same exact-zero, confirmation, locking, and final preflight requirements without changing the automatic-trigger preference
+
+#### Scenario: Manual check is already running
+- **WHEN** the user invokes the safe manual check while a prior manual check is still in progress
+- **THEN** the system ignores the duplicate invocation and does not start a second activation evaluation

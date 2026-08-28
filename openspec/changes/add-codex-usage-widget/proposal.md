@@ -10,6 +10,7 @@ Codex users currently lack an always-visible Windows view of their five-hour and
 - When the five-hour bucket is at 100% remaining, acquire a durable per-account, per-window lock before creating exactly one minimal temporary Codex turn.
 - Select the newest recognized available lightweight model, falling back to the current default model when no lightweight candidate is available.
 - Treat an updated five-hour `resetsAt` value as activation success even when the displayed percentage remains rounded to 100%; never retry after a turn has begun during the same guarded window.
+- Expose a safe manual check in the floating widget that can request the same guarded activation flow while automatic triggering is paused, without bypassing exact-zero eligibility, confirmation, locking, or the final read-only gate.
 - Delete temporary trigger tasks after successful activation and retain only non-sensitive local audit metadata.
 - Fail closed on stale quota data, missing authentication, damaged safety state, or ambiguous trigger outcomes.
 

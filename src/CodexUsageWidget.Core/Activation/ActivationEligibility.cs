@@ -16,7 +16,8 @@ public static class ActivationEligibility
         QuotaSnapshot snapshot,
         bool automationEnabled,
         ActivationAttempt? activeAttempt,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        bool deferFutureResetVerification = false)
     {
         QuotaTriggerInput input = snapshot.FiveHourTriggerInput;
 
@@ -40,9 +41,9 @@ public static class ActivationEligibility
             return Ineligible(input, "usage-nonzero");
         }
 
-        if (input.ResetsAt is { } resetsAt
-            && resetsAt > now
-            && resetsAt <= now + TimeSpan.FromHours(5))
+        if (!deferFutureResetVerification
+            && input.ResetsAt is { } resetsAt
+            && resetsAt > now)
         {
             return Ineligible(input, "verified-future-reset");
         }

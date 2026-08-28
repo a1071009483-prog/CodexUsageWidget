@@ -110,6 +110,300 @@ public sealed class ActivationCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task ManualRequestWhileAutomationPausedStillEnforcesQuotaEligibility()
+    {
+        ActivationResult result = await _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(5, true, true, null),
+            new ActivationRequest(IsAutomationEnabled: false, IsUserInitiated: true));
+
+        Assert.Equal(ActivationOutcome.NotEligible, result.Outcome);
+        Assert.Equal("usage-nonzero", result.Reason);
+        Assert.Empty(_modelBoundary.StartCalls);
+    }
+
+    [Fact]
+    public async Task RollingFullWindowResetIsAdmittedToGuardedFlow()
+    {
+        _quotaSource.EnqueueSuccess(Raw(0, Future((5 * 60 * 60) + 1)));
+        _modelCatalog.Models = Array.Empty<ModelCandidate>();
+
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, Now.AddHours(5)),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
+
+        Assert.Equal(ActivationOutcome.NoModel, result.Outcome);
+        Assert.Equal("local", Assert.Single(_lockStore.Attempts.Values).WindowKind);
+        Assert.Empty(_modelBoundary.StartCalls);
+    }
+
+    [Fact]
+    public async Task StableFutureResetIsRejectedAfterReadOnlyConfirmation()
+    {
+        long fixedReset = Future(5 * 60 * 60);
+        _quotaSource.EnqueueSuccess(Raw(0, fixedReset));
+        _modelCatalog.Models = Array.Empty<ModelCandidate>();
+
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, Now.AddHours(5)),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
+
+        Assert.Equal(ActivationOutcome.NotEligible, result.Outcome);
+        Assert.Equal("refetch-verified-future-reset", result.Reason);
+        Assert.Empty(_modelBoundary.StartCalls);
+    }
+
+    [Fact]
+    public async Task StableFutureResetBeyondFiveHoursFailsClosed()
+    {
+        long fixedReset = Future((5 * 60 * 60) + 2);
+        _quotaSource.EnqueueSuccess(Raw(0, fixedReset));
+        _modelCatalog.Models = Array.Empty<ModelCandidate>();
+
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, Now.AddHours(5).AddSeconds(2)),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
+
+        Assert.Equal(ActivationOutcome.NotEligible, result.Outcome);
+        Assert.Equal("refetch-verified-future-reset", result.Reason);
+        Assert.Empty(_modelBoundary.StartCalls);
+    }
+
+    [Fact]
+    public async Task UnchangedFinalResetFailsClosed()
+    {
+        long rollingReset = Future((5 * 60 * 60) + 1);
+        EnqueueConfirmationSnapshots(
+            Raw(0, rollingReset),
+            Raw(0, rollingReset));
+        _modelBoundary.OnStart = (_, _) =>
+            new ModelGenerationResult(false, false, FailureCategory: "rejected");
+
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, Now.AddHours(5)),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
+
+        Assert.Equal(ActivationOutcome.ExternallySatisfied, result.Outcome);
+        Assert.Empty(_modelBoundary.StartCalls);
+    }
+
+    [Fact]
+    public async Task FinalPreflightWaitsForProvableRollingMovement()
+    {
+        List<DateTimeOffset> readTimes = new();
+        _quotaSource.OnRead = () =>
+        {
+            readTimes.Add(_clock.UtcNow);
+            return new QuotaSourceResult(
+                true,
+                Raw(0, _clock.UtcNow.AddHours(5).ToUnixTimeSeconds()));
+        };
+        _modelBoundary.OnStart = (_, _) =>
+            new ModelGenerationResult(false, false, FailureCategory: "rejected");
+
+        Task<ActivationResult> task = _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, Now.AddHours(5)),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
+
+        Assert.Equal(ActivationOutcome.Failed, result.Outcome);
+        Assert.Equal(2, readTimes.Count);
+        Assert.True(readTimes[1] - readTimes[0] >= TimeSpan.FromSeconds(1));
+        Assert.Single(_modelBoundary.StartCalls);
+    }
+
+    [Fact]
+    public async Task ContinuouslyRollingPostGenerationResetRemainsAmbiguous()
+    {
+        _quotaSource.OnRead = () => new QuotaSourceResult(
+            true,
+            Raw(0, _clock.UtcNow.AddHours(5).ToUnixTimeSeconds()));
+        _modelBoundary.OnStart = (_, _) =>
+            new ModelGenerationResult(true, true, ThreadId: "rolling-thread", TurnId: "rolling-turn");
+        var coordinator = new ActivationCoordinator(
+            _lockStore,
+            _modelCatalog,
+            _modelBoundary,
+            _quotaSource,
+            _auditStore,
+            _cleanupStore,
+            _namespaceHasher,
+            _notifier,
+            _clock,
+            _delay,
+            new ActivationCoordinatorOptions
+            {
+                IsAutomationEnabled = true,
+                ConfirmationDebounce = TimeSpan.FromSeconds(1),
+                TurnTimeout = TimeSpan.FromSeconds(1),
+                VerificationTimeout = TimeSpan.FromSeconds(2),
+                VerificationPollInterval = TimeSpan.FromSeconds(1),
+            });
+
+        Task<ActivationResult> task = coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, Now.AddHours(5)),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
+
+        Assert.Equal(ActivationOutcome.Ambiguous, result.Outcome);
+        Assert.Empty(_modelBoundary.DeleteCalls);
+    }
+
+    [Fact]
+    public async Task RollingPreflightRequiresTwoStablePostGenerationResetsForSuccess()
+    {
+        int readCount = 0;
+        DateTimeOffset stableReset = Now.AddHours(4).AddMinutes(59);
+        _quotaSource.OnRead = () =>
+        {
+            readCount++;
+            long reset = readCount <= 2
+                ? _clock.UtcNow.AddHours(5).ToUnixTimeSeconds()
+                : stableReset.ToUnixTimeSeconds();
+            return new QuotaSourceResult(true, Raw(0, reset));
+        };
+        _modelBoundary.OnStart = (_, _) =>
+            new ModelGenerationResult(true, true, ThreadId: "stable-thread", TurnId: "stable-turn");
+        var coordinator = new ActivationCoordinator(
+            _lockStore,
+            _modelCatalog,
+            _modelBoundary,
+            _quotaSource,
+            _auditStore,
+            _cleanupStore,
+            _namespaceHasher,
+            _notifier,
+            _clock,
+            _delay,
+            new ActivationCoordinatorOptions
+            {
+                IsAutomationEnabled = true,
+                ConfirmationDebounce = TimeSpan.FromSeconds(1),
+                TurnTimeout = TimeSpan.FromSeconds(1),
+                VerificationTimeout = TimeSpan.FromSeconds(3),
+                VerificationPollInterval = TimeSpan.FromSeconds(1),
+            });
+
+        Task<ActivationResult> task = coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, Now.AddHours(5)),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        ActivationResult result = await task;
+
+        Assert.Equal(ActivationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(4, readCount);
+        Assert.Single(_modelBoundary.DeleteCalls);
+    }
+
+    [Fact]
+    public async Task DefaultConfirmationDebounceObservesRollingResetMovement()
+    {
+        _quotaSource.OnRead = () => new QuotaSourceResult(
+            true,
+            Raw(0, _clock.UtcNow.AddHours(5).ToUnixTimeSeconds()));
+        _modelCatalog.Models = Array.Empty<ModelCandidate>();
+        var coordinator = new ActivationCoordinator(
+            _lockStore,
+            _modelCatalog,
+            _modelBoundary,
+            _quotaSource,
+            _auditStore,
+            _cleanupStore,
+            _namespaceHasher,
+            _notifier,
+            _clock,
+            _delay,
+            new ActivationCoordinatorOptions { IsAutomationEnabled = true });
+
+        Task<ActivationResult> task = coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, Now.AddHours(5)),
+            new ActivationRequest(true));
+
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(2));
+
+        ActivationResult result = await task;
+
+        Assert.Equal(ActivationOutcome.NoModel, result.Outcome);
+    }
+
+    [Fact]
+    public async Task UnexpiredLocalGuardSuppressesRollingResetAcrossEpochBoundary()
+    {
+        _quotaSource.OnRead = () => new QuotaSourceResult(
+            true,
+            Raw(0, _clock.UtcNow.AddHours(5).ToUnixTimeSeconds()));
+        _modelCatalog.Models = Array.Empty<ModelCandidate>();
+
+        Task<ActivationResult> firstTask = _coordinator.TryActivateAsync(
+            Identity(),
+            Snapshot(0, true, true, _clock.UtcNow.AddHours(5)),
+            new ActivationRequest(true));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        Assert.Equal(ActivationOutcome.NoModel, (await firstTask).Outcome);
+
+        const long EpochSeconds = 5 * 60 * 60;
+        long currentSeconds = _clock.UtcNow.ToUnixTimeSeconds();
+        long nextEpochSeconds = ((currentSeconds / EpochSeconds) + 1) * EpochSeconds;
+        await _delay.AdvanceAsync(
+            TimeSpan.FromSeconds((nextEpochSeconds - currentSeconds) + 1));
+        QuotaSnapshot laterSnapshot = Snapshot(
+            0,
+            true,
+            true,
+            _clock.UtcNow.AddHours(5)) with { SyncedAt = _clock.UtcNow };
+
+        Task<ActivationResult> secondTask = _coordinator.TryActivateAsync(
+            Identity(),
+            laterSnapshot,
+            new ActivationRequest(true));
+        await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(ActivationOutcome.Suppressed, (await secondTask).Outcome);
+        Assert.Single(_lockStore.Attempts);
+    }
+
+    [Fact]
     public async Task SecondConfirmationFailsReturnsNotEligible()
     {
         _quotaSource.EnqueueSuccess(Raw(5, null));

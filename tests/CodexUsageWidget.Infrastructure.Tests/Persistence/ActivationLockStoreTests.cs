@@ -103,6 +103,35 @@ public sealed class ActivationLockStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task UnexpiredLocalGuardBlocksDifferentLocalEpochInSameScope()
+    {
+        ActivationLockStore store = CreateStore();
+        ActivationAttempt first = NewAttempt(
+            attemptId: "att-local-1",
+            windowKey: "local-epoch-1",
+            windowKind: "local") with
+        {
+            AttemptAt = "2026-07-12T10:00:00.0000000+00:00",
+            SuppressionDeadline = "2026-07-12T15:00:00.0000000+00:00",
+        };
+        ActivationAttempt second = NewAttempt(
+            attemptId: "att-local-2",
+            windowKey: "local-epoch-2",
+            windowKind: "local") with
+        {
+            AttemptAt = "2026-07-12T12:00:00.0000000+00:00",
+            SuppressionDeadline = "2026-07-12T17:00:00.0000000+00:00",
+        };
+
+        Assert.True((await store.TryAcquireAsync(first, CancellationToken.None)).Acquired);
+
+        AcquisitionResult result = await store.TryAcquireAsync(second, CancellationToken.None);
+
+        Assert.False(result.Acquired);
+        Assert.Equal(first.AttemptId, result.Existing?.AttemptId);
+    }
+
+    [Fact]
     public async Task DifferentKeysAreIndependent()
     {
         ActivationLockStore store = CreateStore();

@@ -1,6 +1,7 @@
 using CodexUsageWidget.App.Tests.Testing;
 using CodexUsageWidget.App.ViewModels;
 using CodexUsageWidget.Core.Abstractions;
+using CodexUsageWidget.Core.Activation;
 using CodexUsageWidget.Core.Monitoring;
 using CodexUsageWidget.Core.Quota;
 using Xunit;
@@ -189,6 +190,81 @@ public sealed class MainViewModelTests : IDisposable
         await Task.Delay(50);
 
         Assert.Empty(_activation.Calls);
+    }
+
+    [Fact]
+    public async Task ManualCheckUsesOneShotAuthorizationWithoutChangingPausedPreference()
+    {
+        _source.EnqueueSuccess(FiveHourSnapshot(usedPercent: 5));
+        _source.EnqueueSuccess(FiveHourSnapshot(usedPercent: 5));
+        _viewModel.IsAutomationEnabled = false;
+
+        await _viewModel.StartAsync();
+        _viewModel.ManualActivationCommand.Execute(null);
+        await WaitForConditionAsync(() =>
+            _activation.Calls.Count == 1
+            && _viewModel.ManualActivationStatusText == "当前窗口无需触发");
+
+        ActivationCall call = Assert.Single(_activation.Calls);
+        Assert.False(call.Request.IsAutomationEnabled);
+        Assert.True(call.Request.IsUserInitiated);
+        Assert.False(_viewModel.IsAutomationEnabled);
+        Assert.Equal("当前窗口无需触发", _viewModel.ManualActivationStatusText);
+        Assert.Equal(2, _source.ReadCount);
+    }
+
+    [Fact]
+    public async Task ManualCheckIgnoresDuplicateInvocationWhileRunning()
+    {
+        _source.EnqueueSuccess(FiveHourSnapshot(usedPercent: 5));
+        _source.EnqueueSuccess(FiveHourSnapshot(usedPercent: 5));
+        var completion = new TaskCompletionSource<ActivationResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _activation.OnTryActivate = (_, _) => completion.Task;
+
+        await _viewModel.StartAsync();
+        _viewModel.ManualActivationCommand.Execute(null);
+        await WaitForConditionAsync(() => _activation.Calls.Count == 1);
+
+        Assert.True(_viewModel.IsManualActivationRunning);
+        Assert.False(_viewModel.ManualActivationCommand.CanExecute(null));
+        Assert.Equal("正在检查…", _viewModel.ManualActivationButtonText);
+
+        _viewModel.ManualActivationCommand.Execute(null);
+        Assert.Single(_activation.Calls);
+        Assert.Equal(2, _source.ReadCount);
+
+        completion.SetResult(ActivationResult.NotEligible("usage-nonzero"));
+        await WaitForConditionAsync(() => !_viewModel.IsManualActivationRunning);
+
+        Assert.True(_viewModel.ManualActivationCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task ManualCheckOwnsRefreshEvaluationWhenAutomationIsEnabled()
+    {
+        _source.EnqueueSuccess(FiveHourSnapshot(usedPercent: 5));
+        _source.EnqueueSuccess(FiveHourSnapshot(usedPercent: 0));
+        _viewModel.IsAutomationEnabled = true;
+        var completion = new TaskCompletionSource<ActivationResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _activation.OnTryActivate = (_, _) => completion.Task;
+
+        await _viewModel.StartAsync();
+        _viewModel.ManualActivationCommand.Execute(null);
+
+        try
+        {
+            await WaitForConditionAsync(() => _activation.Calls.Count > 0);
+            await Task.Delay(50);
+
+            ActivationCall call = Assert.Single(_activation.Calls);
+            Assert.True(call.Request.IsUserInitiated);
+        }
+        finally
+        {
+            completion.TrySetResult(ActivationResult.NotEligible("usage-nonzero"));
+        }
     }
 
     [Fact]

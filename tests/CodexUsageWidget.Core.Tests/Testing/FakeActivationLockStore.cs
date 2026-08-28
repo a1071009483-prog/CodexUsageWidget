@@ -36,6 +36,22 @@ internal sealed class FakeActivationLockStore : IActivationLockStore
         string key = Key(attempt.NamespaceHash, attempt.WorkspaceScope, attempt.WindowKey);
         lock (_sync)
         {
+            if (string.Equals(attempt.WindowKind, "local", StringComparison.Ordinal)
+                && DateTimeOffset.TryParse(attempt.AttemptAt, out DateTimeOffset attemptAt))
+            {
+                ActivationAttempt? activeLocal = _byAttempt.Values.FirstOrDefault(existing =>
+                    string.Equals(existing.NamespaceHash, attempt.NamespaceHash, StringComparison.Ordinal)
+                    && string.Equals(existing.WorkspaceScope, attempt.WorkspaceScope, StringComparison.Ordinal)
+                    && string.Equals(existing.WindowKind, "local", StringComparison.Ordinal)
+                    && DateTimeOffset.TryParse(existing.SuppressionDeadline, out DateTimeOffset deadline)
+                    && deadline > attemptAt);
+
+                if (activeLocal is not null)
+                {
+                    return Task.FromResult(new AcquisitionResult(false, activeLocal));
+                }
+            }
+
             if (_byKey.TryGetValue(key, out ActivationAttempt? existing))
             {
                 return Task.FromResult(new AcquisitionResult(false, existing));

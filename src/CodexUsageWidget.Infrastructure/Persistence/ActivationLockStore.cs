@@ -53,10 +53,27 @@ public sealed class ActivationLockStore : IActivationLockStore
         await SetSynchronousFullAsync(connection, cancellationToken).ConfigureAwait(false);
 
         await using DbTransactionWrapper transaction = new(
-            (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false));
+            connection.BeginTransaction(deferred: false));
 
         try
         {
+            if (string.Equals(attempt.WindowKind, "local", StringComparison.Ordinal))
+            {
+                ActivationAttempt? activeLocal = await ReadActiveLocalAttemptAsync(
+                    connection,
+                    transaction.Transaction,
+                    attempt.NamespaceHash,
+                    attempt.WorkspaceScope,
+                    attempt.AttemptAt,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (activeLocal is not null)
+                {
+                    await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                    return new AcquisitionResult(Acquired: false, Existing: activeLocal);
+                }
+            }
+
             await using SqliteCommand command = connection.CreateCommand();
             command.Transaction = transaction.Transaction;
             command.CommandText = """
@@ -286,6 +303,59 @@ WHERE namespace_hash = @ns AND workspace_scope = @ws AND window_key = @wk;
         command.Parameters.Add("@ns", SqliteType.Text).Value = namespaceHash;
         command.Parameters.Add("@ws", SqliteType.Text).Value = workspaceScope;
         command.Parameters.Add("@wk", SqliteType.Text).Value = windowKey;
+
+        await using SqliteDataReader reader = await command
+            .ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return new ActivationAttempt(
+            AttemptId: reader.GetString(0),
+            NamespaceHash: reader.GetString(1),
+            WorkspaceScope: reader.GetString(2),
+            WindowKey: reader.GetString(3),
+            WindowKind: reader.GetString(4),
+            SuppressionDeadline: reader.GetString(5),
+            ObservedAt: reader.GetString(6),
+            AttemptAt: reader.GetString(7),
+            PreUsedPercent: reader.GetInt32(8),
+            PreResetsAt: reader.IsDBNull(9) ? null : reader.GetString(9),
+            ModelId: reader.IsDBNull(10) ? null : reader.GetString(10),
+            TurnStarted: reader.GetInt32(11) != 0,
+            TerminalOutcome: reader.IsDBNull(12) ? null : reader.GetString(12),
+            PostUsedPercent: reader.IsDBNull(13) ? null : reader.GetInt32(13),
+            PostResetsAt: reader.IsDBNull(14) ? null : reader.GetString(14),
+            CleanupState: reader.GetString(15));
+    }
+
+    private static async Task<ActivationAttempt?> ReadActiveLocalAttemptAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string namespaceHash,
+        string workspaceScope,
+        string attemptAt,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+SELECT attempt_id, namespace_hash, workspace_scope, window_key, window_kind,
+       suppression_deadline, observed_at, attempt_at, pre_used_percent,
+       pre_resets_at, model_id, turn_started, terminal_outcome,
+       post_used_percent, post_resets_at, cleanup_state
+FROM activation_attempts
+WHERE namespace_hash = @ns
+  AND workspace_scope = @ws
+  AND window_kind = 'local'
+  AND suppression_deadline > @attempt_at
+ORDER BY suppression_deadline DESC
+LIMIT 1;
+""";
+        command.Parameters.Add("@ns", SqliteType.Text).Value = namespaceHash;
+        command.Parameters.Add("@ws", SqliteType.Text).Value = workspaceScope;
+        command.Parameters.Add("@attempt_at", SqliteType.Text).Value = attemptAt;
 
         await using SqliteDataReader reader = await command
             .ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);

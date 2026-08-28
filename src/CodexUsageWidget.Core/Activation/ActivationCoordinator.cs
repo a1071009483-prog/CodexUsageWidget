@@ -72,7 +72,8 @@ public sealed class ActivationCoordinator : IActivationCoordinator
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.IsAutomationEnabled || !request.IsAutomationEnabled)
+        if (!_options.IsAutomationEnabled
+            || (!request.IsAutomationEnabled && !request.IsUserInitiated))
         {
             return ActivationResult.NotEligible("automation-disabled");
         }
@@ -88,7 +89,8 @@ public sealed class ActivationCoordinator : IActivationCoordinator
                 snapshot,
                 automationEnabled: true,
                 activeAttempt: null,
-                _clock.UtcNow);
+                _clock.UtcNow,
+                deferFutureResetVerification: true);
 
             if (!eligibility.IsEligible)
             {
@@ -111,11 +113,13 @@ public sealed class ActivationCoordinator : IActivationCoordinator
                 return ActivationResult.NotEligible("refetch-failed");
             }
 
+            bool rollingUnusedReset = IsRollingUnusedReset(snapshot, confirmed);
             eligibility = ActivationEligibility.Evaluate(
                 confirmed,
                 automationEnabled: true,
                 activeAttempt: null,
-                _clock.UtcNow);
+                _clock.UtcNow,
+                deferFutureResetVerification: rollingUnusedReset);
 
             if (!eligibility.IsEligible)
             {
@@ -124,7 +128,10 @@ public sealed class ActivationCoordinator : IActivationCoordinator
 
             // Durable guard: an active lock for the same window suppresses this attempt.
             string workspaceScope = NormalizeWorkspaceScope(identity.WorkspaceScope);
-            string windowKey = ComputeWindowKey(snapshot.SyncedAt, confirmed.FiveHour.ResetsAt, out string windowKind);
+            DateTimeOffset? stableWindowReset = rollingUnusedReset
+                ? null
+                : confirmed.FiveHour.ResetsAt;
+            string windowKey = ComputeWindowKey(snapshot.SyncedAt, stableWindowReset, out string windowKind);
 
             ActivationAttempt? activeAttempt = await _lockStore.GetActiveAsync(
                 namespaceHash,
@@ -217,6 +224,20 @@ public sealed class ActivationCoordinator : IActivationCoordinator
                 return ActivationResult.NoModel(attemptId);
             }
 
+            // A second-resolution rolling placeholder must move again before the
+            // final preflight; equality is not evidence and therefore fails closed.
+            if (rollingUnusedReset)
+            {
+                TimeSpan evidenceAge = _clock.UtcNow - confirmed.SyncedAt;
+                TimeSpan minimumEvidenceAge = TimeSpan.FromSeconds(1);
+                if (evidenceAge < minimumEvidenceAge)
+                {
+                    await _delay.DelayAsync(
+                        minimumEvidenceAge - evidenceAge,
+                        cancellationToken).ConfigureAwait(false);
+                }
+            }
+
             // Final preflight immediately before any model consumption.
             QuotaSnapshot? finalPreflight = await FetchSnapshotAsync(cancellationToken).ConfigureAwait(false);
             if (finalPreflight is null)
@@ -247,7 +268,9 @@ public sealed class ActivationCoordinator : IActivationCoordinator
                     finalPreflight,
                     automationEnabled: true,
                     activeAttempt: null,
-                    _clock.UtcNow).IsEligible)
+                    _clock.UtcNow,
+                    deferFutureResetVerification: rollingUnusedReset
+                        && IsRollingUnusedReset(confirmed, finalPreflight)).IsEligible)
             {
                 QuotaSnapshot postSnapshot = finalPreflight;
                 await MarkTerminalAsync(
@@ -436,18 +459,38 @@ public sealed class ActivationCoordinator : IActivationCoordinator
                 }
             }
 
-            // Read-only verification: look for a changed future five-hour reset.
+            // Read-only verification: a previously rolling placeholder needs two
+            // stable post-generation observations so its normal movement cannot be
+            // mistaken for activation success.
             QuotaSnapshot? verifiedSnapshot = null;
+            QuotaSnapshot? previousPostSnapshot = null;
             DateTimeOffset verificationDeadline = _clock.UtcNow + _options.VerificationTimeout;
 
             while (_clock.UtcNow < verificationDeadline)
             {
                 QuotaSnapshot? post = await FetchSnapshotAsync(cancellationToken).ConfigureAwait(false);
-                if (post is not null
-                    && IsVerifiedReset(confirmed.FiveHour.ResetsAt, post.FiveHour.ResetsAt, _clock.UtcNow))
+                bool resetVerified = post is not null
+                    && (rollingUnusedReset
+                        ? previousPostSnapshot is not null
+                            && IsStablePostGenerationReset(
+                                finalPreflight.FiveHour.ResetsAt,
+                                previousPostSnapshot,
+                                post,
+                                _clock.UtcNow)
+                        : IsVerifiedReset(
+                            finalPreflight.FiveHour.ResetsAt,
+                            post.FiveHour.ResetsAt,
+                            _clock.UtcNow));
+
+                if (resetVerified)
                 {
                     verifiedSnapshot = post;
                     break;
+                }
+
+                if (post is not null)
+                {
+                    previousPostSnapshot = post;
                 }
 
                 TimeSpan remaining = verificationDeadline - _clock.UtcNow;
@@ -651,6 +694,54 @@ public sealed class ActivationCoordinator : IActivationCoordinator
 
         TimeSpan ahead = post - now;
         return ahead > TimeSpan.Zero && ahead <= FiveHours;
+    }
+
+    private static bool IsStablePostGenerationReset(
+        DateTimeOffset? preflightReset,
+        QuotaSnapshot previousPost,
+        QuotaSnapshot currentPost,
+        DateTimeOffset now)
+    {
+        DateTimeOffset? previousReset = previousPost.FiveHour.ResetsAt;
+        DateTimeOffset? currentReset = currentPost.FiveHour.ResetsAt;
+
+        return previousPost.IsFresh
+            && currentPost.IsFresh
+            && previousReset.HasValue
+            && currentReset.HasValue
+            && previousReset.Value == currentReset.Value
+            && IsVerifiedReset(preflightReset, currentReset, now);
+    }
+
+    private static bool IsRollingUnusedReset(QuotaSnapshot first, QuotaSnapshot second)
+    {
+        if (first.FiveHour.UsedPercent != 0
+            || second.FiveHour.UsedPercent != 0
+            || first.FiveHour.ResetsAt is not { } firstReset
+            || second.FiveHour.ResetsAt is not { } secondReset)
+        {
+            return false;
+        }
+
+        TimeSpan observationShift = second.SyncedAt - first.SyncedAt;
+        if (observationShift <= TimeSpan.Zero)
+        {
+            return false;
+        }
+
+        TimeSpan firstHorizon = firstReset - first.SyncedAt;
+        TimeSpan secondHorizon = secondReset - second.SyncedAt;
+        TimeSpan resetShift = secondReset - firstReset;
+        TimeSpan minimumFullWindowHorizon = FiveHours - TimeSpan.FromMinutes(1);
+        TimeSpan horizonTolerance = TimeSpan.FromSeconds(2);
+        TimeSpan driftTolerance = TimeSpan.FromSeconds(1);
+
+        return firstHorizon >= minimumFullWindowHorizon
+            && firstHorizon <= FiveHours + horizonTolerance
+            && secondHorizon >= minimumFullWindowHorizon
+            && secondHorizon <= FiveHours + horizonTolerance
+            && resetShift > TimeSpan.Zero
+            && (resetShift - observationShift).Duration() < driftTolerance;
     }
 
     private async Task MarkTerminalAsync(

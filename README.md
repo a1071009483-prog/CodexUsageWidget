@@ -17,6 +17,10 @@ window with exactly one guarded minimal turn.
 - Read-only reconciliation every 60 seconds, with no model turns.
 - Automatic activation when the five-hour bucket is fully unused (`usedPercent = 0`),
   using two confirmations, a durable write-ahead lock, and a final preflight.
+- Rolling `now + 5h` reset placeholders are verified across the two read-only
+  confirmations instead of being mistaken for an already-active timer.
+- A safe **检查并触发** button that runs the same guarded eligibility flow
+  without changing the automatic-trigger preference or offering a force override.
 - Dynamic lightweight model selection with fallback to the current default model.
 - At-most-once generation per account and five-hour window, surviving crashes,
   restarts, and App Server reconnections.

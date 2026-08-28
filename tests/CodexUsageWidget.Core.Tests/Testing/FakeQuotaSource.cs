@@ -13,6 +13,8 @@ internal sealed class FakeQuotaSource : IQuotaSource
 
     public Exception? ExceptionToThrow { get; set; }
 
+    public Func<QuotaSourceResult>? OnRead { get; set; }
+
     public void EnqueueResult(QuotaSourceResult result) => _results.Enqueue(result);
 
     public void EnqueueSuccess(RawRateLimitSnapshot snapshot) =>
@@ -25,6 +27,11 @@ internal sealed class FakeQuotaSource : IQuotaSource
         if (ExceptionToThrow is not null)
         {
             throw ExceptionToThrow;
+        }
+
+        if (OnRead is not null)
+        {
+            return Task.FromResult(OnRead());
         }
 
         if (_results.Count == 0)

@@ -31,7 +31,7 @@ The primary constraints are:
 
 - Bypassing, resetting, increasing, or otherwise circumventing an OpenAI usage limit.
 - Guaranteeing that the service displays exactly 99% remaining after a minimal turn.
-- Triggering when the five-hour bucket has any recorded use, or providing a manual force-consume control.
+- Triggering when the five-hour bucket has any recorded use, or providing a manual control that bypasses the guarded eligibility flow.
 - Scraping the Codex dashboard, parsing the interactive `/status` display, reading browser cookies, or directly reading raw Codex authentication files.
 - Supporting API-key-only allowance monitoring, macOS, Linux, multi-user services, or remote fleet administration in the first release.
 - Predicting the exact quota cost of a model turn or guaranteeing that a provider-side policy will continue to treat the first turn as a five-hour window start.
@@ -42,7 +42,7 @@ The primary constraints are:
 
 The application will be a WPF process with a borderless draggable topmost window and a system-tray icon. A named Windows mutex enforces a single instance; a small named-pipe signal brings the existing widget forward when a second launch is attempted. The application remembers its monitor-relative position and validates it against the current multi-monitor work area and DPI whenever displays change.
 
-The tray owns show/hide, read-only refresh, pause/resume activation, Windows-startup preference, audit viewing, reconnect, and exit. Startup is registered per user and is opt-out. The widget shows official percentages and a separate activation state; it never fabricates 99% when the server still reports 100%.
+The tray owns show/hide, read-only refresh, pause/resume activation, Windows-startup preference, audit viewing, reconnect, and exit. The floating widget also exposes one clearly labeled safe manual check. It enters the same guarded coordinator as automatic activation, but supplies one-shot user authorization so it can be evaluated while automatic triggering is paused; it never bypasses quota eligibility or changes the persisted pause state. Startup is registered per user and is opt-out. The widget shows official percentages and a separate activation state; it never fabricates 99% when the server still reports 100%.
 
 Alternatives considered:
 
@@ -86,14 +86,14 @@ The window key uses the authoritative server limit/reset epoch when one exists. 
 
 The activation flow is:
 
-1. Require automatic activation to be enabled, a fresh 300-minute bucket to report `usedPercent = 0`, and no verified future reset or durable success record showing that the same timer is already active.
-2. Confirm the same eligibility through two independent reads separated by a short debounce.
-3. In one database transaction, verify no active suppression record and insert the durable pending attempt.
-4. Perform one final read immediately before model selection. If another Codex task has already used the window or advanced `resetsAt`, mark the attempt satisfied externally and do not create a thread.
+1. Require either enabled automatic activation or one explicit manual-check invocation, and a fresh 300-minute bucket to report `usedPercent = 0`. A single future `resetsAt` is only a candidate signal because an unused bucket may expose a rolling placeholder equal to the read time plus five hours. Manual authorization applies to one evaluation only and does not mutate the automatic-trigger setting.
+2. Confirm the same eligibility through two independent reads separated by a two-second debounce. If `resetsAt` advances with the elapsed observation time while both horizons remain approximately five hours, classify it as an unused-window placeholder; if the future instant remains stable or otherwise cannot be proven rolling, fail closed as an active timer. Rolling placeholders use the durable local eligibility epoch rather than an unstable authoritative window key.
+3. In one immediate database transaction, verify no active suppression record and insert the durable pending attempt. For rolling placeholders, the transaction searches the whole account/workspace scope for any unexpired local guard before inserting, so crossing a computed epoch boundary cannot create a second lock.
+4. Before the final read, allow at least one second after the prior rolling observation so positive movement can be proven at the protocol timestamp resolution. Then perform the final read immediately before model selection. Revalidate exact-zero state and continuity of the rolling placeholder; equality or otherwise unprovable movement fails closed. If another Codex task has already used the window or established a stable reset, mark the attempt satisfied externally and do not create a thread.
 5. Resolve a model, create a fresh temporary thread in an empty read-only working directory, and start a constant fixed-response turn with the lowest supported reasoning effort, no client-supplied dynamic tools, and a non-interactive approval policy.
 6. Once App Server accepts or announces the turn, mark `turn_started` and prohibit all further model fallbacks and retries for the suppression period.
 7. Wait for the short turn to complete. On timeout or an unexpected tool-use event, interrupt it once and retain the guard.
-8. Re-read rate limits, using read-only checks for up to 60 seconds. A changed `resetsAt` in the expected future five-hour range marks success even if `usedPercent` remains rounded to zero.
+8. Re-read rate limits, using read-only checks for up to 60 seconds. For a baseline without a rolling placeholder, a changed `resetsAt` in the expected future five-hour range marks success even if `usedPercent` remains rounded to zero. For a rolling baseline, two consecutive post-generation reads must report the same changed future reset; a value that continues moving with observation time remains ambiguous.
 9. Delete the completed temporary thread and persist the post-state. A delete failure creates cleanup work that can run later without a model call.
 
 Failure, timeout, ambiguous verification, child-process loss, or application crash leaves the attempt guarded until its suppression deadline. The application never tries to compensate with another generation. After the deadline, only a new fresh 100%-remaining observation can open a new attempt.

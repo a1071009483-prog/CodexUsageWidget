@@ -101,9 +101,17 @@ The application MUST validate safety-critical settings, anti-repeat state, and a
 - **WHEN** the application cannot validate the stored anti-repeat state for an account and five-hour window
 - **THEN** it creates no turn, disables automatic triggering, and displays a fail-closed safety error while read-only quota monitoring remains available
 
-### Requirement: No forced-consumption control
-The application MUST NOT expose a button, tray command, keyboard shortcut, command-line option, or other user-facing entry point that creates a Codex turn or forces quota consumption. The guarded automatic-trigger workflow SHALL be the only widget-initiated path that can start an unused five-hour window, and it SHALL run only when automatic triggering is enabled and all safety preconditions pass.
+### Requirement: Safe manual activation check without forced consumption
+The floating widget SHALL expose a `检查并触发` button that requests one guarded activation evaluation. The control MUST NOT force quota consumption: a Codex turn may be created only when the fresh five-hour bucket reports exact `usedPercent = 0` and the existing confirmation, durable deduplication, and final read-only preflight requirements all pass. The manual check MAY run while automatic triggering is paused and MUST NOT change that persisted preference. While a manual check is running, the button SHALL be disabled to prevent duplicate invocation, and the widget SHALL expose a concise in-progress or terminal status.
 
-#### Scenario: The user reviews every widget and tray action
-- **WHEN** the widget and tray commands are enumerated or invoked
-- **THEN** none offers manual consumption or turn creation, and Refresh Now performs only a read-only reconciliation
+#### Scenario: Manual check is ineligible
+- **WHEN** the user selects `检查并触发` while the five-hour window is already active, stale, unavailable, or otherwise ineligible
+- **THEN** the widget reports that the current window does not need triggering and creates no Codex turn
+
+#### Scenario: Manual check is eligible
+- **WHEN** the user selects `检查并触发` while automatic triggering is paused and all guarded activation conditions pass
+- **THEN** the application may create at most one isolated activation turn through the existing guarded workflow while leaving automatic triggering paused
+
+#### Scenario: Refresh remains read-only
+- **WHEN** the user invokes Refresh Now rather than `检查并触发`
+- **THEN** the application performs only a read-only reconciliation and creates no Codex turn

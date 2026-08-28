@@ -72,9 +72,18 @@ Right-click the system-tray icon for:
 - **Reconnect** — restart the Codex App Server connection.
 - **Exit** — close the resident application.
 
-There is **no** force-consume or manual trigger command. Automatic activation is
-the only widget-initiated path that can start a turn, and it runs only when all
-safety preconditions pass.
+## Safe manual check
+
+The floating widget includes **检查并触发** below the quota cards. It first
+refreshes quota data, then runs the same exact-zero checks, consecutive
+confirmations, durable lock, and final read-only preflight as automatic
+activation. It can be used while automatic triggering is paused and does not
+change that preference.
+
+This is not a force-consume control. If the five-hour window is active, stale,
+unavailable, or otherwise ineligible, the widget shows `当前窗口无需触发` and
+creates no Codex turn. The button is disabled while its check is running so a
+double-click cannot start another evaluation.
 
 ## Automatic five-hour activation
 
@@ -85,6 +94,15 @@ unused five-hour window once per window:
 2. The current account uses ChatGPT-backed Codex authentication.
 3. The five-hour bucket is fresh and reports exactly `usedPercent = 0`.
 4. No durable lock or verified future reset proves the window is already active.
+
+An unused bucket can report a reset that moves forward to approximately five
+hours from every read. The widget distinguishes this rolling placeholder from a
+real timer through two read-only observations separated by two seconds. A stable
+future reset remains protected as already active; a proven rolling placeholder
+continues through the guarded activation flow using an unexpired local guard that
+is reused even across a computed epoch boundary. The final preflight requires the
+placeholder to move again; after generation, two stable post-generation reset
+observations are required before success is reported.
 
 The activation workflow:
 

@@ -11,9 +11,10 @@ public sealed record ActivationCoordinatorOptions
     public bool IsAutomationEnabled { get; init; }
 
     /// <summary>
-    /// Debounce between the two consecutive quota confirmations. Defaults to zero.
+    /// Debounce between the two consecutive quota confirmations. Defaults to two seconds
+    /// so second-resolution rolling reset timestamps can be distinguished from stable timers.
     /// </summary>
-    public TimeSpan ConfirmationDebounce { get; init; } = TimeSpan.Zero;
+    public TimeSpan ConfirmationDebounce { get; init; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
     /// Maximum time to wait for a started turn to complete before interrupting. Defaults to 10 seconds.

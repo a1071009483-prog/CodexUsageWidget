@@ -38,6 +38,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <!-- Header -->
@@ -86,6 +87,56 @@
                 <ContentControl Margin="0,0,0,10" Content="{Binding FiveHour}" />
                 <ContentControl Content="{Binding Weekly}" />
             </StackPanel>
+
+            <!-- Safe manual activation check -->
+            <Border
+                Grid.Row="3"
+                Margin="0,12,0,0"
+                Padding="10"
+                Background="#252A31"
+                BorderBrush="#3D526A"
+                BorderThickness="1"
+                CornerRadius="10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="4" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border
+                        Grid.Column="0"
+                        Margin="0,1,0,1"
+                        Background="#6F9FC7"
+                        CornerRadius="2" />
+                    <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                        <Button
+                            x:Name="ManualActivationButton"
+                            Height="34"
+                            Padding="12,0"
+                            HorizontalContentAlignment="Center"
+                            AutomationProperties.HelpText="仅在5小时额度为0%且窗口未启动时发送一次安全请求"
+                            Background="#31465B"
+                            BorderBrush="#5F7F9E"
+                            BorderThickness="1"
+                            Command="{Binding ManualActivationCommand}"
+                            Content="{Binding ManualActivationButtonText}"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="#F4F8FC" />
+                        <TextBlock
+                            Margin="0,7,0,0"
+                            FontSize="10"
+                            Foreground="#AAB7C4"
+                            Text="仅在5小时用量为0%且窗口未启动时发送一次"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            Margin="0,3,0,0"
+                            FontSize="10"
+                            Foreground="#7F9AB3"
+                            Text="{Binding ManualActivationStatusText}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+            </Border>
         </Grid>
     </Border>
 </Window>
