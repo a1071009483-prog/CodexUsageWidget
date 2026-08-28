@@ -118,5 +118,5 @@ procedures, is in [docs/acceptance-matrix.md](docs/acceptance-matrix.md).
 
 ## License and third-party notices
 
-The project license will be published in the root `LICENSE` file before the
-stable `1.0.0` release. See `THIRD-PARTY-NOTICES.md` for dependency licenses.
+Codex Usage Widget is licensed under the [MIT License](LICENSE) (`MIT`). See
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for dependency licenses.
