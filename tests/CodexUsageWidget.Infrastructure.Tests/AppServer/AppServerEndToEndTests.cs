@@ -346,10 +346,13 @@ public sealed class AppServerEndToEndTests : IDisposable
 
             await monitor.StartAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
 
-            // Advance past the monitor's one-second loop tick so the notification read runs.
-            await delay.AdvanceAsync(TimeSpan.FromSeconds(2));
-
-            QuotaSnapshot updated = await updatedTcs.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            // Keep advancing manual time until the notification-driven read publishes.
+            // A notification that arrives between loop iterations parks the manual
+            // delay, so a single fixed advance is not guaranteed to observe it.
+            QuotaSnapshot updated = await WaitForWithTimeAdvancesAsync(
+                updatedTcs.Task,
+                delay,
+                TimeSpan.FromSeconds(15));
 
             Assert.True(updated.IsFresh);
             Assert.True(updated.FiveHour.IsAvailable);
@@ -411,6 +414,34 @@ public sealed class AppServerEndToEndTests : IDisposable
             },
         },
     };
+
+    /// <summary>
+    /// Awaits a task while repeatedly advancing the manual clock so monitor loop
+    /// ticks parked on <see cref="ManualDelay"/> keep running. Fails with a real
+    /// timeout if the task does not complete in time.
+    /// </summary>
+    private static async Task<T> WaitForWithTimeAdvancesAsync<T>(
+        Task<T> task,
+        ManualDelay delay,
+        TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow + timeout;
+        while (true)
+        {
+            Task completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromMilliseconds(50)));
+            if (completed == task)
+            {
+                return await task;
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new TimeoutException($"The observed task did not complete within {timeout}.");
+            }
+
+            await delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+        }
+    }
 
     /// <summary>
     /// Best-effort teardown that always reclaims the supervisor and its fake

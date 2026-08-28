@@ -159,7 +159,20 @@ public sealed class AuditStoreTests : IDisposable
 
         string dbPath = Path.Combine(_tempDir, "state.db");
         Assert.True(File.Exists(dbPath));
-        byte[] bytes = await File.ReadAllBytesAsync(dbPath);
+        byte[] bytes;
+        // The pooled SQLite connection may still hold the file open; read with
+        // sharing so the raw-bytes assertion works on Windows file locking.
+        await using (FileStream stream = new(
+            dbPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete))
+        {
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            bytes = memory.ToArray();
+        }
+
         string text = System.Text.Encoding.UTF8.GetString(bytes);
 
         Assert.DoesNotContain(rawEmail, text);
