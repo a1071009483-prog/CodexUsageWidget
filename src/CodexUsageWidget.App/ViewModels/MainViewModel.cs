@@ -1,5 +1,6 @@
 using System.Windows.Input;
 using CodexUsageWidget.App.Helpers;
+using CodexUsageWidget.App.Services;
 using CodexUsageWidget.Core.Abstractions;
 using CodexUsageWidget.Core.Activation;
 using CodexUsageWidget.Core.Monitoring;
@@ -25,6 +26,8 @@ public sealed class MainViewModel : ViewModelBase, ITrayCommandSource, IDisposab
     private bool _startWithWindows;
     private bool _isMainWindowVisible = true;
     private string _connectionStateText = "未连接";
+    private string _environmentDiagnosticText = string.Empty;
+    private string _runtimeDiagnosticText = string.Empty;
     private string _manualActivationStatusText = "安全检查不会绕过额度条件";
     private int _manualActivationGate;
     private bool _disposed;
@@ -77,6 +80,29 @@ public sealed class MainViewModel : ViewModelBase, ITrayCommandSource, IDisposab
     {
         get => _connectionStateText;
         private set => SetProperty(ref _connectionStateText, value);
+    }
+
+    /// <summary>User-facing startup environment diagnostic, empty when ready.</summary>
+    public string EnvironmentDiagnosticText
+    {
+        get => _environmentDiagnosticText;
+        private set
+        {
+            if (SetProperty(ref _environmentDiagnosticText, value))
+            {
+                OnPropertyChanged(nameof(HasEnvironmentDiagnostic));
+            }
+        }
+    }
+
+    /// <summary>Whether a startup environment diagnostic should be displayed.</summary>
+    public bool HasEnvironmentDiagnostic => !string.IsNullOrWhiteSpace(EnvironmentDiagnosticText);
+
+    /// <summary>Non-sensitive runtime versions for diagnostics and support.</summary>
+    public string RuntimeDiagnosticText
+    {
+        get => _runtimeDiagnosticText;
+        private set => SetProperty(ref _runtimeDiagnosticText, value);
     }
 
     /// <summary>Concise progress or terminal state for the safe manual check.</summary>
@@ -164,15 +190,21 @@ public sealed class MainViewModel : ViewModelBase, ITrayCommandSource, IDisposab
     }
 
     /// <summary>
-    /// Informs the view model that authentication is required so the UI reflects
-    /// the blocked state and automatic activation stays disabled.
+    /// Applies the structured startup environment result. Blocked states disable
+    /// automatic activation and surface a normal-user diagnostic message.
     /// </summary>
-    public void SetAuthenticationRequired()
+    public void ApplyStartupEnvironment(StartupEnvironmentStatus status)
     {
-        IsAutomationEnabled = false;
-        ConnectionStateText = FormatConnectionState(
-            MonitoringConnectionState.AuthenticatingRequired,
-            scopeLabel: null);
+        ArgumentNullException.ThrowIfNull(status);
+
+        if (!status.CanActivate)
+        {
+            IsAutomationEnabled = false;
+        }
+
+        EnvironmentDiagnosticText = status.IsReady ? string.Empty : status.UserMessage;
+        RuntimeDiagnosticText =
+            $"Widget {status.WidgetVersion} · Codex {status.CodexCliVersion ?? "未知"} · {status.WindowsVersion}";
     }
 
     /// <summary>Informs the view model that the main window visibility changed.</summary>

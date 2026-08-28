@@ -101,7 +101,7 @@ public partial class App : System.Windows.Application
 
         IUserNotifier notifier = new WindowsNotificationService(notifyIcon);
         IDelay delay = new TaskDelay();
-        (IQuotaSource quotaSource, IActivationCoordinator activationCoordinator, AccountIdentity identity, bool isAuthenticated) =
+        (IQuotaSource quotaSource, IActivationCoordinator activationCoordinator, AccountIdentity identity, StartupEnvironmentStatus environment) =
             await CreateLiveServicesAsync(localAppData, clock, delay, notifier).ConfigureAwait(true);
 
         _monitor = new QuotaMonitor(
@@ -135,10 +135,7 @@ public partial class App : System.Windows.Application
         _mainViewModel.StartWithWindows = settings.StartWithWindows;
         _mainViewModel.PropertyChanged += OnMainViewModelPropertyChanged;
 
-        if (!isAuthenticated)
-        {
-            _mainViewModel.SetAuthenticationRequired();
-        }
+        _mainViewModel.ApplyStartupEnvironment(environment);
 
         trayIconService.Initialize(_mainViewModel);
         _mainWindow.DataContext = _mainViewModel;
@@ -226,7 +223,7 @@ public partial class App : System.Windows.Application
         _saltStore?.Dispose();
     }
 
-    private async Task<(IQuotaSource QuotaSource, IActivationCoordinator ActivationCoordinator, AccountIdentity Identity, bool IsAuthenticated)> CreateLiveServicesAsync(
+    private async Task<(IQuotaSource QuotaSource, IActivationCoordinator ActivationCoordinator, AccountIdentity Identity, StartupEnvironmentStatus Environment)> CreateLiveServicesAsync(
         string localAppData,
         IClock clock,
         IDelay delay,
@@ -237,12 +234,38 @@ public partial class App : System.Windows.Application
         Directory.CreateDirectory(appServerWorkingDirectory);
 
         AccountIdentity fallbackIdentity = new("design@local.invalid", "design", "global");
+        string widgetVersion = ApplicationVersion.Current;
+        string windowsVersion = Environment.OSVersion.VersionString;
+
+        StartupEnvironmentStatus Blocked(StartupEnvironmentKind kind, string message, string? cliVersion) =>
+            new(kind, message, widgetVersion, cliVersion, windowsVersion, CanActivate: false);
 
         CodexExecutableResolution resolution = CodexExecutableLocator.CreateSystem().Locate();
         if (!resolution.Found)
         {
-            return (new DesignQuotaSource(), new NoOpActivationCoordinator(), fallbackIdentity, false);
+            return (new DesignQuotaSource(), new NoOpActivationCoordinator(), fallbackIdentity,
+                Blocked(
+                    StartupEnvironmentKind.CodexCliMissing,
+                    "未找到 Codex CLI。请先安装 Codex CLI，然后运行 codex login。",
+                    null));
         }
+
+        using var startupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // Best-effort CLI version probe for diagnostics and acceptance evidence.
+        string? cliVersionText = null;
+        try
+        {
+            CodexCliVersionResult cliVersion = await new CodexCliVersionProbe(new SystemProcessHost())
+                .GetVersionAsync(resolution.Command!, startupCts.Token).ConfigureAwait(true);
+            cliVersionText = cliVersion.Version;
+        }
+        catch (OperationCanceledException)
+        {
+            // Version probing is diagnostic-only; startup continues without it.
+        }
+
+        string? incompatibility = null;
 
         try
         {
@@ -305,13 +328,14 @@ public partial class App : System.Windows.Application
                     WorkingDirectory = appServerWorkingDirectory,
                 });
 
-            using var startupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var readyTcs = new TaskCompletionSource();
             EventHandler<AppServerSupervisorEventArgs> onReady = (_, _) => readyTcs.TrySetResult();
             EventHandler<AppServerIncompatibleEventArgs> onIncompatible = (_, args) =>
-                readyTcs.TrySetException(
-                    new InvalidOperationException(
-                        $"The Codex App Server is missing required methods: {string.Join(", ", args.MissingMethods)}."));
+            {
+                incompatibility =
+                    $"The Codex App Server is missing required methods: {string.Join(", ", args.MissingMethods)}.";
+                readyTcs.TrySetException(new InvalidOperationException(incompatibility));
+            };
             _appServerSupervisor.SessionPublished += onReady;
             _appServerSupervisor.IncompatibleDetected += onIncompatible;
             try
@@ -325,17 +349,63 @@ public partial class App : System.Windows.Application
                 _appServerSupervisor.IncompatibleDetected -= onIncompatible;
             }
 
-            var identityProvider = new AppServerAccountIdentityProvider(
-                _appServerSupervisor,
-                new AccountAuthenticationEvaluator());
-            AccountIdentity identity = await identityProvider.GetIdentityAsync(startupCts.Token).ConfigureAwait(true);
+            AppServerGenerationSession? generation = _appServerSupervisor.CurrentGeneration;
+            if (generation is null)
+            {
+                throw new InvalidOperationException("The App Server session is not available.");
+            }
 
-            return (_appServerQuotaSource, coordinator, identity, true);
+            AccountReadResponse accountResponse = await generation.Session.Gateway
+                .ReadAccountAsync(refreshToken: false, startupCts.Token).ConfigureAwait(true);
+            AuthenticationAssessment assessment = new AccountAuthenticationEvaluator().Evaluate(accountResponse);
+
+            if (assessment.State == AuthenticationState.Required)
+            {
+                await DisposeLiveServicesAsync().ConfigureAwait(false);
+                return (new DesignQuotaSource(), new NoOpActivationCoordinator(), fallbackIdentity,
+                    Blocked(
+                        StartupEnvironmentKind.AuthenticationRequired,
+                        "Codex 尚未登录。请在终端运行 codex login，然后重新连接。",
+                        cliVersionText));
+            }
+
+            if (assessment.State == AuthenticationState.Unsupported)
+            {
+                await DisposeLiveServicesAsync().ConfigureAwait(false);
+                return (new DesignQuotaSource(), new NoOpActivationCoordinator(), fallbackIdentity,
+                    Blocked(
+                        StartupEnvironmentKind.UnsupportedAuthentication,
+                        "需要使用 ChatGPT 账号登录 Codex；仅 API Key 的认证方式暂不支持。",
+                        cliVersionText));
+            }
+
+            AccountIdentity identity = new(
+                assessment.IdentityMaterial ?? string.Empty,
+                assessment.PlanType,
+                assessment.WorkspaceIdentity);
+
+            return (_appServerQuotaSource, coordinator, identity,
+                new StartupEnvironmentStatus(
+                    StartupEnvironmentKind.Ready,
+                    string.Empty,
+                    widgetVersion,
+                    cliVersionText,
+                    windowsVersion,
+                    CanActivate: true));
         }
         catch
         {
             await DisposeLiveServicesAsync().ConfigureAwait(false);
-            return (new DesignQuotaSource(), new NoOpActivationCoordinator(), fallbackIdentity, false);
+
+            StartupEnvironmentKind kind = incompatibility is not null
+                ? StartupEnvironmentKind.AppServerIncompatible
+                : StartupEnvironmentKind.StartupError;
+            string message = incompatibility is not null
+                ? "当前 Codex CLI 与 Codex Usage Widget 的 App Server 协议不兼容。"
+                : "Codex Usage Widget 启动时发生错误。请确认 Codex CLI 可用后重新启动应用。";
+
+            return (new DesignQuotaSource(), new NoOpActivationCoordinator(), fallbackIdentity,
+                Blocked(kind, message, cliVersionText));
         }
     }
 
