@@ -67,7 +67,7 @@ public sealed class QuotaMonitorTests : IAsyncLifetime, IDisposable
             _source.EnqueueSuccess(FiveHourSnapshot(20));
             _source.RaiseUpdated();
 
-            await WaitUntilAsync(() => changes.Count == 2);
+            await AdvanceUntilAsync(() => changes.Count == 2);
 
             Assert.Equal(2, _source.ReadCount);
             Assert.Equal(2, changes.Count);
@@ -265,7 +265,7 @@ public sealed class QuotaMonitorTests : IAsyncLifetime, IDisposable
                 new RawRateLimitWindow(20, null, 300L)));
             _source.RaiseUpdated();
 
-            await WaitUntilAsync(() => monitor.CurrentSnapshot.ScopeLabel == "PlanB");
+            await AdvanceUntilAsync(() => monitor.CurrentSnapshot.ScopeLabel == "PlanB");
 
             Assert.Equal("PlanB", monitor.CurrentSnapshot.ScopeLabel);
             Assert.Equal(20, monitor.CurrentSnapshot.FiveHour.UsedPercent);
@@ -328,6 +328,18 @@ public sealed class QuotaMonitorTests : IAsyncLifetime, IDisposable
 
             await _delay.AdvanceAsync(step);
             await WaitUntilAsync(() => _delay.NextDeadline > _clock.UtcNow || _delay.PendingCount == 0);
+        }
+    }
+
+    private async Task AdvanceUntilAsync(Func<bool> condition)
+    {
+        // A notification landing between monitor loop iterations parks the manual
+        // delay; advance in one-second steps (staying below the 60-second poll
+        // interval) until the loop observes it.
+        for (int i = 0; i < 50 && !condition(); i++)
+        {
+            await _delay.AdvanceAsync(TimeSpan.FromSeconds(1));
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
         }
     }
 
