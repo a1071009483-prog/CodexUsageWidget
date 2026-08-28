@@ -23,9 +23,25 @@ jobs:
         shell: pwsh
         run: dotnet restore CodexUsageWidget.sln
 
-      - name: Test
+      - name: Core tests
+        timeout-minutes: 3
         shell: pwsh
-        run: .\scripts\build.ps1 -Configuration Release -NoRestore
+        run: dotnet test tests/CodexUsageWidget.Core.Tests/CodexUsageWidget.Core.Tests.csproj -c Release --no-restore --blame-hang --blame-hang-timeout 60s
+
+      - name: Infrastructure tests
+        timeout-minutes: 5
+        shell: pwsh
+        run: dotnet test tests/CodexUsageWidget.Infrastructure.Tests/CodexUsageWidget.Infrastructure.Tests.csproj -c Release --no-restore --blame-hang --blame-hang-timeout 60s
+
+      - name: App tests
+        timeout-minutes: 3
+        shell: pwsh
+        run: dotnet test tests/CodexUsageWidget.App.Tests/CodexUsageWidget.App.Tests.csproj -c Release --no-restore --blame-hang --blame-hang-timeout 60s
+
+      - name: Acceptance tests
+        timeout-minutes: 3
+        shell: pwsh
+        run: dotnet test tests/CodexUsageWidget.AcceptanceTests/CodexUsageWidget.AcceptanceTests.csproj -c Release --no-restore --blame-hang --blame-hang-timeout 60s
 
       - name: Package portable artifact
         shell: pwsh

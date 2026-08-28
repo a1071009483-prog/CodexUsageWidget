@@ -89,23 +89,30 @@ public sealed class AppServerEndToEndTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         Task startTask = supervisor.StartAsync(cts.Token);
 
-        await WaitForSessionsAsync(sessions, count: 1, timeout: TimeSpan.FromSeconds(10));
+        try
+        {
+            await WaitForSessionsAsync(sessions, count: 1, timeout: TimeSpan.FromSeconds(10));
 
-        RateLimitsReadResponse first = await sessions[0].Session.Gateway
-            .ReadRateLimitsAsync(CancellationToken.None)
-            .WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(10, first.RateLimits.Primary!.UsedPercent);
+            RateLimitsReadResponse first = await sessions[0].Session.Gateway
+                .ReadRateLimitsAsync(CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(10, first.RateLimits.Primary!.UsedPercent);
 
-        await WaitForSessionsAsync(sessions, count: 2, timeout: TimeSpan.FromSeconds(20), supervisorForDiagnostics: supervisor);
+            await WaitForSessionsAsync(sessions, count: 2, timeout: TimeSpan.FromSeconds(20), supervisorForDiagnostics: supervisor);
 
-        RateLimitsReadResponse second = await sessions[1].Session.Gateway
-            .ReadRateLimitsAsync(CancellationToken.None)
-            .WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(10, second.RateLimits.Primary!.UsedPercent);
+            RateLimitsReadResponse second = await sessions[1].Session.Gateway
+                .ReadRateLimitsAsync(CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(10, second.RateLimits.Primary!.UsedPercent);
 
-        await supervisor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-        await startTask.WaitAsync(TimeSpan.FromSeconds(10));
-        await supervisor.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            await supervisor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+            await startTask.WaitAsync(TimeSpan.FromSeconds(10));
+            await supervisor.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            await CleanupSupervisorAsync(supervisor, cts, startTask);
+        }
     }
 
     [Fact]
@@ -126,14 +133,21 @@ public sealed class AppServerEndToEndTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         Task startTask = supervisor.StartAsync(cts.Token);
 
-        await WaitForNotificationsAsync(notifications, count: 1, timeout: TimeSpan.FromSeconds(5));
+        try
+        {
+            await WaitForNotificationsAsync(notifications, count: 1, timeout: TimeSpan.FromSeconds(5));
 
-        Assert.Single(notifications);
-        Assert.Equal(42, notifications[0].Primary!.UsedPercent);
+            Assert.Single(notifications);
+            Assert.Equal(42, notifications[0].Primary!.UsedPercent);
 
-        await supervisor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-        await startTask.WaitAsync(TimeSpan.FromSeconds(10));
-        await supervisor.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            await supervisor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+            await startTask.WaitAsync(TimeSpan.FromSeconds(10));
+            await supervisor.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            await CleanupSupervisorAsync(supervisor, cts, startTask);
+        }
     }
 
     [Fact]
@@ -169,14 +183,21 @@ public sealed class AppServerEndToEndTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         Task startTask = supervisor.StartAsync(cts.Token);
 
-        await WaitForNotificationsAsync(notifications, count: 2, timeout: TimeSpan.FromSeconds(20));
+        try
+        {
+            await WaitForNotificationsAsync(notifications, count: 2, timeout: TimeSpan.FromSeconds(20));
 
-        Assert.Equal(7, notifications[0].Primary!.UsedPercent);
-        Assert.Equal(8, notifications[1].Primary!.UsedPercent);
+            Assert.Equal(7, notifications[0].Primary!.UsedPercent);
+            Assert.Equal(8, notifications[1].Primary!.UsedPercent);
 
-        await supervisor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-        await startTask.WaitAsync(TimeSpan.FromSeconds(10));
-        await supervisor.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            await supervisor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+            await startTask.WaitAsync(TimeSpan.FromSeconds(10));
+            await supervisor.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            await CleanupSupervisorAsync(supervisor, cts, startTask);
+        }
     }
 
     [Fact]
@@ -203,55 +224,61 @@ public sealed class AppServerEndToEndTests : IDisposable
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         Task startTask = supervisor.StartAsync(cts.Token);
-        await WaitForSessionsAsync(sessions, count: 1, timeout: TimeSpan.FromSeconds(10));
 
-        using var quotaSource = new AppServerQuotaSource(supervisor);
-        await using var monitor = new QuotaMonitor(
-            quotaSource,
-            clock,
-            delay,
-            pollInterval: TimeSpan.FromHours(1),
-            staleThreshold: TimeSpan.FromSeconds(120),
-            notificationDebounce: TimeSpan.Zero);
-
-        await monitor.StartAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
-
-        QuotaSnapshot? first = monitor.CurrentSnapshot;
-        Assert.NotNull(first);
-        Assert.True(first.IsFresh);
-        Assert.True(first.FiveHour.IsAvailable);
-        Assert.Equal(0, first.FiveHour.UsedPercent);
-        Assert.Equal(100, first.FiveHour.RemainingPercent);
-
-        var staleTcs = new TaskCompletionSource();
-        monitor.SnapshotChanged += (_, s) =>
+        try
         {
-            if (!s.IsFresh)
+            await WaitForSessionsAsync(sessions, count: 1, timeout: TimeSpan.FromSeconds(10));
+
+            using var quotaSource = new AppServerQuotaSource(supervisor);
+            await using var monitor = new QuotaMonitor(
+                quotaSource,
+                clock,
+                delay,
+                pollInterval: TimeSpan.FromHours(1),
+                staleThreshold: TimeSpan.FromSeconds(120),
+                notificationDebounce: TimeSpan.Zero);
+
+            await monitor.StartAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+            QuotaSnapshot? first = monitor.CurrentSnapshot;
+            Assert.NotNull(first);
+            Assert.True(first.IsFresh);
+            Assert.True(first.FiveHour.IsAvailable);
+            Assert.Equal(0, first.FiveHour.UsedPercent);
+            Assert.Equal(100, first.FiveHour.RemainingPercent);
+
+            var staleTcs = new TaskCompletionSource();
+            monitor.SnapshotChanged += (_, s) =>
             {
-                staleTcs.TrySetResult();
-            }
-        };
+                if (!s.IsFresh)
+                {
+                    staleTcs.TrySetResult();
+                }
+            };
 
-        await delay.AdvanceAsync(TimeSpan.FromSeconds(121));
-        await staleTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await delay.AdvanceAsync(TimeSpan.FromSeconds(121));
+            await staleTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        QuotaSnapshot? stale = monitor.CurrentSnapshot;
-        Assert.NotNull(stale);
-        Assert.False(stale.IsFresh);
-        Assert.Equal(0, stale.FiveHour.UsedPercent);
-        Assert.Equal(100, stale.FiveHour.RemainingPercent);
+            QuotaSnapshot? stale = monitor.CurrentSnapshot;
+            Assert.NotNull(stale);
+            Assert.False(stale.IsFresh);
+            Assert.Equal(0, stale.FiveHour.UsedPercent);
+            Assert.Equal(100, stale.FiveHour.RemainingPercent);
 
-        ActivationEligibilityResult eligibility = ActivationEligibility.Evaluate(
-            stale,
-            automationEnabled: true,
-            activeAttempt: null,
-            clock.UtcNow);
-        Assert.False(eligibility.IsEligible);
-        Assert.Equal("stale", eligibility.Reason);
+            ActivationEligibilityResult eligibility = ActivationEligibility.Evaluate(
+                stale,
+                automationEnabled: true,
+                activeAttempt: null,
+                clock.UtcNow);
+            Assert.False(eligibility.IsEligible);
+            Assert.Equal("stale", eligibility.Reason);
 
-        await monitor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
-        await supervisor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-        await startTask.WaitAsync(TimeSpan.FromSeconds(10));
+            await monitor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            await CleanupSupervisorAsync(supervisor, cts, startTask);
+        }
     }
 
     [Fact]
@@ -294,50 +321,56 @@ public sealed class AppServerEndToEndTests : IDisposable
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         Task startTask = supervisor.StartAsync(cts.Token);
-        await WaitForSessionsAsync(sessions, count: 1, timeout: TimeSpan.FromSeconds(10));
 
-        using var quotaSource = new AppServerQuotaSource(supervisor);
-        await using var monitor = new QuotaMonitor(
-            quotaSource,
-            clock,
-            delay,
-            pollInterval: TimeSpan.FromHours(1),
-            staleThreshold: TimeSpan.FromSeconds(120),
-            notificationDebounce: TimeSpan.Zero);
-
-        var updatedTcs = new TaskCompletionSource<QuotaSnapshot>();
-        monitor.SnapshotChanged += (_, s) =>
+        try
         {
-            if (s.FiveHour.UsedPercent > 0)
+            await WaitForSessionsAsync(sessions, count: 1, timeout: TimeSpan.FromSeconds(10));
+
+            using var quotaSource = new AppServerQuotaSource(supervisor);
+            await using var monitor = new QuotaMonitor(
+                quotaSource,
+                clock,
+                delay,
+                pollInterval: TimeSpan.FromHours(1),
+                staleThreshold: TimeSpan.FromSeconds(120),
+                notificationDebounce: TimeSpan.Zero);
+
+            var updatedTcs = new TaskCompletionSource<QuotaSnapshot>();
+            monitor.SnapshotChanged += (_, s) =>
             {
-                updatedTcs.TrySetResult(s);
-            }
-        };
+                if (s.FiveHour.UsedPercent > 0)
+                {
+                    updatedTcs.TrySetResult(s);
+                }
+            };
 
-        await monitor.StartAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+            await monitor.StartAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
 
-        // Advance past the monitor's one-second loop tick so the notification read runs.
-        await delay.AdvanceAsync(TimeSpan.FromSeconds(2));
+            // Advance past the monitor's one-second loop tick so the notification read runs.
+            await delay.AdvanceAsync(TimeSpan.FromSeconds(2));
 
-        QuotaSnapshot updated = await updatedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            QuotaSnapshot updated = await updatedTcs.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
-        Assert.True(updated.IsFresh);
-        Assert.True(updated.FiveHour.IsAvailable);
-        Assert.Equal(5, updated.FiveHour.UsedPercent);
-        Assert.Equal(95, updated.FiveHour.RemainingPercent);
-        Assert.NotNull(updated.FiveHour.ResetsAt);
+            Assert.True(updated.IsFresh);
+            Assert.True(updated.FiveHour.IsAvailable);
+            Assert.Equal(5, updated.FiveHour.UsedPercent);
+            Assert.Equal(95, updated.FiveHour.RemainingPercent);
+            Assert.NotNull(updated.FiveHour.ResetsAt);
 
-        ActivationEligibilityResult eligibility = ActivationEligibility.Evaluate(
-            updated,
-            automationEnabled: true,
-            activeAttempt: null,
-            clock.UtcNow);
-        Assert.False(eligibility.IsEligible);
-        Assert.Equal("usage-nonzero", eligibility.Reason);
+            ActivationEligibilityResult eligibility = ActivationEligibility.Evaluate(
+                updated,
+                automationEnabled: true,
+                activeAttempt: null,
+                clock.UtcNow);
+            Assert.False(eligibility.IsEligible);
+            Assert.Equal("usage-nonzero", eligibility.Reason);
 
-        await monitor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
-        await supervisor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-        await startTask.WaitAsync(TimeSpan.FromSeconds(10));
+            await monitor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            await CleanupSupervisorAsync(supervisor, cts, startTask);
+        }
     }
 
     private static object InitializeResult() => new
@@ -378,6 +411,36 @@ public sealed class AppServerEndToEndTests : IDisposable
             },
         },
     };
+
+    /// <summary>
+    /// Best-effort teardown that always reclaims the supervisor and its fake
+    /// App Server child processes, even when a test fails or times out midway.
+    /// </summary>
+    private static async Task CleanupSupervisorAsync(
+        AppServerSupervisor supervisor,
+        CancellationTokenSource cts,
+        Task startTask)
+    {
+        cts.Cancel();
+
+        try
+        {
+            await supervisor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch
+        {
+            // Best-effort cleanup; the original test failure takes precedence.
+        }
+
+        try
+        {
+            await startTask.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch
+        {
+            // Best-effort cleanup; the original test failure takes precedence.
+        }
+    }
 
     private static string NotificationLine(int usedPercent) =>
         JsonSerializer.Serialize(new
