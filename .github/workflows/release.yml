@@ -143,15 +143,15 @@ jobs:
       - name: Verify release
         shell: pwsh
         run: |
-          $verifyArgs = @(
-            '-Version', '${{ steps.version.outputs.version }}',
-            '-RuntimeIdentifier', 'win-x64',
-            '-RequireInstaller'
-          )
-          if ('${{ steps.sign-app.outputs.signed }}' -eq 'true') {
-            $verifyArgs += '-RequireSignatures'
+          $verifyParams = @{
+            Version = '${{ steps.version.outputs.version }}'
+            RuntimeIdentifier = 'win-x64'
+            RequireInstaller = $true
           }
-          .\scripts\verify-release.ps1 @verifyArgs
+          if ('${{ steps.sign-app.outputs.signed }}' -eq 'true') {
+            $verifyParams['RequireSignatures'] = $true
+          }
+          .\scripts\verify-release.ps1 @verifyParams
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
