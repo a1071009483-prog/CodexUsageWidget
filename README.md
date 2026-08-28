@@ -1,13 +1,37 @@
 # Codex Usage Widget
 
-A resident Windows .NET 8 WPF floating widget that shows your Codex five-hour and
-weekly quota in real time and can automatically start a fully unused five-hour
-window with exactly one guarded minimal turn.
+A resident Windows floating widget that shows your Codex five-hour and weekly
+quota in real time and can automatically start a fully unused five-hour window
+with exactly one guarded minimal turn.
 
-> **Platform:** Windows 10 version 19041 (20H2) or later, or Windows 11.  
-> **Runtime:** .NET 8 with Windows Desktop Runtime, or the self-contained build.  
-> **Authentication:** ChatGPT-backed Codex CLI (`codex login`). API-key-only
-> accounts are not supported.
+> **Supported:** Windows 10 version 19041 (20H2) or later, or Windows 11 (x64).
+>
+> **Authentication:** ChatGPT-backed Codex CLI login (`codex login`).
+> API-key-only accounts are not supported.
+>
+> **No .NET SDK or administrator rights required** when installing from a
+> release installer.
+
+## Install (recommended)
+
+1. Install the [Codex CLI](https://github.com/openai/codex).
+2. Run `codex login` once and sign in with your ChatGPT account.
+3. Open the
+   [GitHub Releases](https://github.com/a1071009483-prog/CodexUsageWidget/releases)
+   page and download `CodexUsageWidget-Setup-<version>.exe`.
+4. Double-click the installer. The widget starts automatically and lives in the
+   system tray.
+
+The installer is per-user, needs no administrator rights, and installs under
+`%LOCALAPPDATA%\Programs\CodexUsageWidget\`. Your settings, audit history, and
+activation safety state live separately under `%LOCALAPPDATA%\CodexUsageWidget\`
+and are kept when you uninstall or upgrade.
+
+Pre-release builds (`beta`/`rc`) may be unsigned; they are labeled as
+pre-releases on the Releases page. Stable releases are Authenticode-signed.
+
+See [docs/install.md](docs/install.md) for the portable ZIP, source-build, and
+uninstall details, and [docs/usage.md](docs/usage.md) for everyday usage.
 
 ## Features
 
@@ -24,32 +48,12 @@ window with exactly one guarded minimal turn.
 - Dynamic lightweight model selection with fallback to the current default model.
 - At-most-once generation per account and five-hour window, surviving crashes,
   restarts, and App Server reconnections.
+- Clear startup diagnostics when the Codex CLI is missing, not logged in,
+  using an unsupported authentication type, or protocol-incompatible.
 - System-tray controls for Show/Hide, Refresh Now, Pause/Resume automatic
   triggering, Start with Windows, Audit, Reconnect, and Exit.
 - Redacted local audit and crash reports; no tokens, cookies, prompts, or
   responses are stored.
-
-## Quick start
-
-1. Install the [Codex CLI](https://github.com/openai/codex) and sign in:
-   ```powershell
-   codex login
-   ```
-2. Build and package the widget:
-   ```powershell
-   .\scripts\package.ps1 -Configuration Release
-   ```
-3. Install per user:
-   ```powershell
-   .\scripts\install.ps1
-   ```
-4. Start the widget:
-   ```powershell
-   $env:LOCALAPPDATA\CodexUsageWidget\CodexUsageWidget.exe
-   ```
-
-See [docs/install.md](docs/install.md) for detailed installation and upgrade
-instructions, and [docs/usage.md](docs/usage.md) for everyday usage.
 
 ## Repository layout
 
@@ -64,22 +68,28 @@ instructions, and [docs/usage.md](docs/usage.md) for everyday usage.
 │   ├── CodexUsageWidget.App.Tests/
 │   ├── CodexUsageWidget.AcceptanceTests/ # Windows + real Codex CLI only
 │   └── FakeCodexAppServer/               # Scriptable test double
-├── scripts/                              # Build, package, install, upgrade, rollback
+├── scripts/                              # Build, package, verify, installer tooling
+├── installer/                            # Inno Setup per-user installer definition
 ├── docs/                                 # User and acceptance documentation
 ├── openspec/changes/add-codex-usage-widget/  # OpenSpec proposal, design, and specs
 └── THIRD-PARTY-NOTICES.md
 ```
 
-## Build and test
+## Build from source
 
-Open a PowerShell prompt in the repository root:
+Building from source requires the exact .NET SDK version pinned in
+`global.json` and is only needed for contributors. Open a PowerShell prompt in
+the repository root:
 
 ```powershell
 # Run all automated tests
 .\scripts\build.ps1 -Configuration Release
 
-# Build a self-contained single-file release
-.\scripts\package.ps1 -Configuration Release
+# Build a versioned, self-contained release payload + portable ZIP
+.\scripts\package.ps1 -Configuration Release -RuntimeIdentifier win-x64 -Version 0.0.0-dev -Clean
+
+# Verify the packaged release output
+.\scripts\verify-release.ps1 -Version 0.0.0-dev -RuntimeIdentifier win-x64
 ```
 
 The acceptance tests require a Windows environment with the Codex CLI
@@ -110,4 +120,5 @@ procedures, is in [docs/acceptance-matrix.md](docs/acceptance-matrix.md).
 
 ## License and third-party notices
 
-See `LICENSE` (if present) and `THIRD-PARTY-NOTICES.md` for dependency licenses.
+Codex Usage Widget is licensed under the [MIT License](LICENSE) (`MIT`). See
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for dependency licenses.

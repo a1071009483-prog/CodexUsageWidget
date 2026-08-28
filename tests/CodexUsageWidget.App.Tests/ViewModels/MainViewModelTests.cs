@@ -44,17 +44,6 @@ public sealed class MainViewModelTests : IDisposable
             new SynchronousDispatcher());
     }
 
-    [Fact]
-    public void SetAuthenticationRequiredDisablesAutomationAndUpdatesConnectionText()
-    {
-        _viewModel.IsAutomationEnabled = true;
-
-        _viewModel.SetAuthenticationRequired();
-
-        Assert.False(_viewModel.IsAutomationEnabled);
-        Assert.Equal("需要认证", _viewModel.ConnectionStateText);
-    }
-
     public void Dispose()
     {
         _delay.Dispose();

@@ -1,0 +1,218 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  WINDOWS_SIGNING_TIMESTAMP_URL: http://timestamp.digicert.com
+
+jobs:
+  build:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      signed: ${{ steps.sign-app.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$') {
+            throw "Tag '$tag' is not a supported semantic version tag."
+          }
+          $version = $Matches.version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          $isPrerelease = $version.Contains('-')
+          "prerelease=$($isPrerelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore CodexUsageWidget.sln
+
+      - name: Test
+        timeout-minutes: 10
+        shell: pwsh
+        run: .\scripts\build.ps1 -Configuration Release -NoRestore
+
+      - name: Package portable artifact
+        shell: pwsh
+        run: .\scripts\package.ps1 -Configuration Release -RuntimeIdentifier win-x64 -Version ${{ steps.version.outputs.version }} -Clean
+
+      - name: Sign application
+        id: sign-app
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          $isPrerelease = "${{ steps.version.outputs.prerelease }}" -eq 'true'
+          $hasSecrets = -not [string]::IsNullOrWhiteSpace($env:PFX_BASE64)
+          if (-not $isPrerelease -and -not $hasSecrets) {
+            throw "Stable releases require WINDOWS_SIGNING_PFX_BASE64 signing secrets."
+          }
+          if (-not $hasSecrets) {
+            Write-Host "Signing secrets not configured; continuing as unsigned prerelease."
+            "signed=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codex-widget-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:PFX_BASE64))
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\' } |
+              Sort-Object -Property FullName -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+            if ([string]::IsNullOrWhiteSpace($signtool)) {
+              throw "signtool.exe not found in the Windows SDK installation."
+            }
+            $exe = ".\artifacts\publish\win-x64\Release\CodexUsageWidget.exe"
+            & $signtool sign /fd SHA256 /td SHA256 /tr $env:WINDOWS_SIGNING_TIMESTAMP_URL /f $pfxPath /p $env:PFX_PASSWORD $exe
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed for $exe" }
+          }
+          finally {
+            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
+          }
+          "signed=true" >> $env:GITHUB_OUTPUT
+
+      - name: Repackage signed payload
+        if: steps.sign-app.outputs.signed == 'true'
+        shell: pwsh
+        run: |
+          . .\scripts\ReleaseChecksums.ps1
+          $zip = ".\artifacts\release\CodexUsageWidget-${{ steps.version.outputs.version }}-win-x64.zip"
+          Compress-Archive -Path ".\artifacts\publish\win-x64\Release\*" -DestinationPath $zip -CompressionLevel Optimal -Force
+          Write-ReleaseChecksums -ReleaseRoot .\artifacts\release
+
+      - name: Install Inno Setup
+        id: inno
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) {
+            choco install innosetup --no-progress -y
+          }
+          if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) {
+            throw "Inno Setup 6 installation failed; ISCC.exe not found."
+          }
+          "iscc=$iscc" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer
+        shell: pwsh
+        run: .\scripts\build-installer.ps1 -Version ${{ steps.version.outputs.version }} -SourceDirectory .\artifacts\publish\win-x64\Release -IsccPath "${{ steps.inno.outputs.iscc }}"
+
+      - name: Sign installer
+        if: steps.sign-app.outputs.signed == 'true'
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codex-widget-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:PFX_BASE64))
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\' } |
+              Sort-Object -Property FullName -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+            $setup = ".\artifacts\release\CodexUsageWidget-Setup-${{ steps.version.outputs.version }}.exe"
+            & $signtool sign /fd SHA256 /td SHA256 /tr $env:WINDOWS_SIGNING_TIMESTAMP_URL /f $pfxPath /p $env:PFX_PASSWORD $setup
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed for $setup" }
+          }
+          finally {
+            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Finalize checksums
+        shell: pwsh
+        run: |
+          . .\scripts\ReleaseChecksums.ps1
+          Write-ReleaseChecksums -ReleaseRoot .\artifacts\release
+
+      - name: Verify release
+        shell: pwsh
+        run: |
+          $verifyParams = @{
+            Version = '${{ steps.version.outputs.version }}'
+            RuntimeIdentifier = 'win-x64'
+            RequireInstaller = $true
+          }
+          if ('${{ steps.sign-app.outputs.signed }}' -eq 'true') {
+            $verifyParams['RequireSignatures'] = $true
+          }
+          .\scripts\verify-release.ps1 @verifyParams
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            artifacts/release/CodexUsageWidget-Setup-${{ steps.version.outputs.version }}.exe
+            artifacts/release/CodexUsageWidget-${{ steps.version.outputs.version }}-win-x64.zip
+            artifacts/release/SHA256SUMS.txt
+          if-no-files-found: error
+
+  publish-prerelease:
+    if: needs.build.outputs.prerelease == 'true'
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: artifacts/release
+
+      - name: Publish prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ needs.build.outputs.version }}"
+          gh release create "${{ github.ref_name }}" `
+            ".\artifacts\release\CodexUsageWidget-Setup-$version.exe" `
+            ".\artifacts\release\CodexUsageWidget-$version-win-x64.zip" `
+            ".\artifacts\release\SHA256SUMS.txt" `
+            --generate-notes `
+            --prerelease
+
+  publish-stable:
+    if: needs.build.outputs.prerelease == 'false'
+    needs: build
+    runs-on: windows-latest
+    environment: stable-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: artifacts/release
+
+      - name: Publish stable release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ needs.build.outputs.version }}"
+          gh release create "${{ github.ref_name }}" `
+            ".\artifacts\release\CodexUsageWidget-Setup-$version.exe" `
+            ".\artifacts\release\CodexUsageWidget-$version-win-x64.zip" `
+            ".\artifacts\release\SHA256SUMS.txt" `
+            --generate-notes

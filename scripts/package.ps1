@@ -7,15 +7,30 @@ param(
 
     [string] $OutputDirectory = '',
 
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
+    [string] $Version,
+
+    [switch] $Clean,
+
     [switch] $NoRestore
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'ReleaseChecksums.ps1')
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $solution = Join-Path $repoRoot 'CodexUsageWidget.sln'
 $appProject = Join-Path $repoRoot 'src\CodexUsageWidget.App\CodexUsageWidget.App.csproj'
+
+if ($Clean) {
+    $publishCleanRoot = Join-Path $repoRoot 'artifacts\publish'
+    $releaseCleanRoot = Join-Path $repoRoot 'artifacts\release'
+    Remove-Item -LiteralPath $publishCleanRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $releaseCleanRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path (Join-Path (Join-Path (Join-Path $repoRoot 'artifacts') 'publish') $RuntimeIdentifier) $Configuration
@@ -35,6 +50,9 @@ else {
     $dotnet = $dotnetCommand.Source
 }
 
+# FileVersion requires four numeric components and cannot contain prerelease text.
+$fileVersion = ($Version -split '-')[0] + '.0'
+
 $arguments = @(
     'publish'
     $appProject
@@ -45,6 +63,11 @@ $arguments = @(
     '--nologo'
     '-p:PublishSingleFile=true'
     '-p:EnableWindowsTargeting=true'
+    '-p:DebugType=none'
+    '-p:DebugSymbols=false'
+    "-p:Version=$Version"
+    "-p:InformationalVersion=$Version"
+    "-p:FileVersion=$fileVersion"
 )
 
 if ($NoRestore) {
@@ -64,3 +87,12 @@ if (Test-Path -LiteralPath $noticesSource -PathType Leaf) {
 }
 
 Write-Host "Published self-contained build to: $OutputDirectory"
+
+$releaseRoot = Join-Path $repoRoot 'artifacts\release'
+New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
+
+$zipPath = Join-Path $releaseRoot "CodexUsageWidget-$Version-$RuntimeIdentifier.zip"
+Compress-Archive -Path (Join-Path $OutputDirectory '*') -DestinationPath $zipPath -CompressionLevel Optimal -Force
+Write-Host "Created portable archive: $zipPath"
+
+Write-ReleaseChecksums -ReleaseRoot $releaseRoot

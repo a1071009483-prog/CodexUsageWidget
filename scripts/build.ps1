@@ -31,6 +31,9 @@ $arguments = @(
     '--configuration'
     $Configuration
     '--nologo'
+    '--blame-hang'
+    '--blame-hang-timeout'
+    '60s'
 )
 
 if ($NoRestore) {

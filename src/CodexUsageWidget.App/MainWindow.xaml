@@ -19,6 +19,9 @@
     Background="Transparent"
     mc:Ignorable="d"
     d:DataContext="{d:DesignInstance Type=vm:MainViewModel, IsDesignTimeCreatable=False}">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+    </Window.Resources>
     <Border
         Background="#1E1E24"
         BorderBrush="#3A3A44"
@@ -35,6 +38,8 @@
         </Border.Effect>
         <Grid Margin="16,14">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -82,15 +87,32 @@
                 Foreground="#888888"
                 Text="{Binding ConnectionStateText}" />
 
+            <!-- Startup environment diagnostic -->
+            <Border
+                Grid.Row="2"
+                Margin="0,0,0,12"
+                Padding="10"
+                Background="#33262A"
+                BorderBrush="#6A4A52"
+                BorderThickness="1"
+                CornerRadius="10"
+                Visibility="{Binding HasEnvironmentDiagnostic, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <TextBlock
+                    FontSize="11"
+                    Foreground="#E8C4C4"
+                    Text="{Binding EnvironmentDiagnosticText}"
+                    TextWrapping="Wrap" />
+            </Border>
+
             <!-- Cards -->
-            <StackPanel Grid.Row="2" Orientation="Vertical">
+            <StackPanel Grid.Row="3" Orientation="Vertical">
                 <ContentControl Margin="0,0,0,10" Content="{Binding FiveHour}" />
                 <ContentControl Content="{Binding Weekly}" />
             </StackPanel>
 
             <!-- Safe manual activation check -->
             <Border
-                Grid.Row="3"
+                Grid.Row="4"
                 Margin="0,12,0,0"
                 Padding="10"
                 Background="#252A31"
@@ -137,6 +159,15 @@
                     </StackPanel>
                 </Grid>
             </Border>
+
+            <!-- Runtime diagnostics (non-sensitive versions) -->
+            <TextBlock
+                Grid.Row="5"
+                Margin="0,10,0,0"
+                FontSize="9"
+                Foreground="#5A5A66"
+                Text="{Binding RuntimeDiagnosticText}"
+                TextWrapping="Wrap" />
         </Grid>
     </Border>
 </Window>
